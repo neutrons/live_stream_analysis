@@ -1,37 +1,31 @@
 [project]
-name = "examplepyapp"
-description = "Example Python repo for neutrons"
+name = "live_stream_analysis"
+description = "Python repo for live stream analysis neutrons"
 dynamic = ["version"]
 requires-python = ">=3.10"
 license = { text = "MIT" }
-keywords = ["neutrons", "example", "python"]
+keywords = ["neutrons", "python"]
 readme = "README.md"
 dependencies = [
   # Dependencies available from both PyPI and conda should be listed here
   "numpy",
-  "QtPy",
-  "PyQt5",
-  "pyqtgraph",
-  # Dependencies only available from PyPI should be listed here
-  "bm3d-streak-removal>=0.2.0,<0.3",
-  "pytest-playwright>=0.7.0,<0.8",
 ]
 
 # We use this section to map conda packages to PyPI packages if they have different names
 # NOTE: prefix-dev provide minimum mapping, and we should add them in explicitly whenever
 #       needed.
-[conda-pypi-map]
-"conda-forge" = """
-{
-  "pyqt": "PyQt5",
-}
-"""
+#[conda-pypi-map]
+#"conda-forge" = """
+#{
+#  "pyqt": "PyQt5",
+#}
+#"""
 
 [project.urls]
-homepage = "https://github.com/neutrons/python_project_template/"  # if no homepage, use repo url
-repository = "https://github.com/neutrons/python_project_template/"
+homepage = "https://github.com/neutrons/live_stream_analysis/"  # if no homepage, use repo url
+repository = "https://github.com/neutrons/live_stream_analysis/"
 # documentation = add_url_to_readthedoc_here
-issues = "https://github.com/neutrons/python_project_template/issues"
+issues = "https://github.com/neutrons/live_stream_analysis/issues"
 
 [build-system]
 requires = [
@@ -55,7 +49,7 @@ dirty = "{version}+d{build_date:%Y%m%d}"
 distance-dirty = "{next_version}.dev{distance}+d{build_date:%Y%m%d%H%M}"
 
 [tool.versioningit.write]
-file = "src/packagenamepy/_version.py"
+file = "src/live_stream_analysis/_version.py"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -65,13 +59,10 @@ exclude = ["tests*", "scripts*", "docs*", "notebooks*"]
 "*" = ["*.yml","*.yaml","*.ini"]
 
 [project.scripts]
-packagename-cli = "packagenamepy.packagename:main"
-
-[project.gui-scripts]
-packagenamepy = "packagenamepy.packagename:gui"
+live-stream-analysis-cli = "live_stream_analysis:main"
 
 [tool.pytest.ini_options]
-addopts = "-v --cov=packagenamepy --cov-report=term-missing"
+addopts = "-v --cov=live_steam_analysis --cov-report=term-missing"
 pythonpath = [
   ".", "src", "scripts"
 ]
@@ -98,7 +89,7 @@ select = ["E", "F", "I"]
 ignore = []
 
 [tool.ruff.lint.isort]
-known-first-party = ["packagenamepy"]
+known-first-party = ["live_stream_analysis"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -113,7 +104,7 @@ channels = ["conda-forge"]
 platforms = ["linux-64", "osx-arm64"]  # add additional platforms as needed
 
 [tool.pixi.pypi-dependencies]
-examplepyapp = { path = ".", editable = true }
+live_stream_analysis = { path = ".", editable = true }
 
 # The dependencies listed below will be prioritized over the ones
 # listed in the [project] section.
@@ -121,11 +112,6 @@ examplepyapp = { path = ".", editable = true }
 # This will overwrite the dependencies listed in the [project] section
 numpy = "*"
 scipy = "*"  # specify derivative dependencies here if you need them from conda
-# GUI
-pyqtgraph = "*"
-qt = "*"
-qtpy = "*"
-pyqt = "*"
 
 [tool.pixi.tasks]
 # PyPi packaging tasks

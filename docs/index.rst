@@ -1,5 +1,5 @@
 =========================================
-Welcome to python project template docs!
+Welcome to live stream analysis docs!
 =========================================
 
 .. toctree::

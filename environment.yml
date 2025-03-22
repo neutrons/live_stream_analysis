@@ -1,10 +1,10 @@
-name: mypythonapp
+name: live-stream-analysis 
 channels:
   - conda-forge
 dependencies:
   # -- Runtime dependencies
   # base: list all base dependencies here
-  - python>=3.8  # please specify the minimum version of python here
+  - python>=3.9  # please specify the minimum version of python here
   - versioningit
   # compute: list all compute dependencies here
   - numpy
@@ -40,5 +40,4 @@ dependencies:
   # if packages are not available on conda, list them here
   - pip
   - pip:
-    - bm3d-streak-removal # example
     - pytest-playwright
