@@ -11,7 +11,6 @@ repos:
       - id: check-xml
       - id: check-yaml
         args: [--allow-multiple-documents]
-        exclude: "conda.recipe/meta.yaml"
       - id: end-of-file-fixer
         exclude: "tests/cis_tests/.*"
       - id: trailing-whitespace

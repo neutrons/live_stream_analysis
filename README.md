@@ -70,7 +70,7 @@ If your target channel is not `neutrons`, make sure change it in the `package_pi
 ## Pixi
 
 Pixi is a tool that helps to manage the project's dependencies and environment.
-Currently this template repo have both conventional `conda` based environment (`environment.yml` and `conda.recipe/meta.yaml`) and `pixi` based environment (`pyproject.toml`).
+This project uses Pixi with `pyproject.toml` as the single source of truth for dependencies and packaging.
 
 ### How to use Pixi
 
@@ -87,17 +87,16 @@ Currently this template repo have both conventional `conda` based environment (`
     ❯ pixi run
 
     Available tasks:
-            build-conda
+            conda-build
             build-docs
             build-pypi
             clean-all
             clean-conda
             clean-docs
             clean-pypi
-            publish-conda
+            conda-publish
             publish-pypi
             test
-            verify-conda
     ```
 
 1. Remember to remove the GitHub actions that still use `conda` actions.
@@ -114,5 +113,5 @@ export PIXI_CACHE_DIR="$HOME/.pixi/cache"
 
 ### Known issues
 
-On SNS Analysis systems, the `pixi run build-conda` task will fail due to `sqlite3` file locking issue.
+On SNS Analysis systems, the `pixi run conda-build` task may fail due to `sqlite3` file locking issue.
 This is most likely due to the user directory being a shared mount, which interfering with `pixi` and `conda` environment locking.

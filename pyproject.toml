@@ -8,11 +8,14 @@ keywords = ["neutrons", "python"]
 readme = "README.md"
 dependencies = [
   # Dependencies available from both PyPI and conda should be listed here
-  "numpy",
+  "numpy>=2.2.6,<3",
 ]
 
 [project.optional-dependencies]
 docs = ["sphinx", "sphinx_rtd_theme", "versioningit", "myst-parser"]
+
+[project.scripts]
+live-stream-analysis-cli = "live_stream_analysis.main:main"
 
 [project.urls]
 homepage = "https://github.com/neutrons/live_stream_analysis/"  # if no homepage, use repo url
@@ -21,13 +24,26 @@ repository = "https://github.com/neutrons/live_stream_analysis/"
 issues = "https://github.com/neutrons/live_stream_analysis/issues"
 
 [build-system]
-requires = [
-  "setuptools>= 42",
-  "wheel",
-  "toml",
-  "versioningit"
+build-backend = "hatchling.build"
+requires = ["hatchling", "versioningit"]
+
+[tool.hatch.version]
+source = "versioningit"
+
+[tool.hatch.build.hooks.versioningit-onbuild]
+source-file = "src/live_stream_analysis/_version.py"
+build-file = "live_stream_analysis/_version.py"
+
+[tool.hatch.build]
+artifacts = [
+  "src/live_stream_analysis/_version.py",
+  "src/live_stream_analysis/**/*.yml",
+  "src/live_stream_analysis/**/*.yaml",
+  "src/live_stream_analysis/**/*.ini",
 ]
-build-backend = "setuptools.build_meta"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/live_stream_analysis"]
 
 [tool.versioningit.vcs]
 method = "git"
@@ -37,22 +53,12 @@ default-tag = "0.1.0"
 method = "minor"
 
 [tool.versioningit.format]
-distance = "{next_version}.dev{distance}"
-dirty = "{version}+d{build_date:%Y%m%d}"
-distance-dirty = "{next_version}.dev{distance}+d{build_date:%Y%m%d%H%M}"
+distance = "{next_version}.dev{committer_date:%Y%m%d%H%M%S}"
+dirty = "{version}"
+distance-dirty = "{next_version}.dev{committer_date:%Y%m%d%H%M%S}"
 
 [tool.versioningit.write]
 file = "src/live_stream_analysis/_version.py"
-
-[tool.setuptools.packages.find]
-where = ["src"]
-exclude = ["tests*", "scripts*", "docs*", "notebooks*"]
-
-[tool.setuptools.package-data]
-"*" = ["*.yml","*.yaml","*.ini"]
-
-[project.scripts]
-live-stream-analysis-cli = "live_stream_analysis:main"
 
 [tool.pytest.ini_options]
 addopts = "-v --cov=live_stream_analysis --cov-report=term-missing"
@@ -92,8 +98,13 @@ line-ending = "auto"
 # Pixi configuration #
 # ------------------ #
 [tool.pixi.workspace]
-channels = ["conda-forge"]
+preview = ["pixi-build"]
+channels = [
+  "conda-forge",
+  "https://prefix.dev/pixi-build-backends",
+]
 platforms = ["linux-64", "osx-arm64"]  # add additional platforms as needed
+conda-pypi-map = { "conda-forge" = "pixi-mapping.json" }
 
 [tool.pixi.pypi-dependencies]
 live_stream_analysis = { path = ".", editable = true }
@@ -105,28 +116,48 @@ live_stream_analysis = { path = ".", editable = true }
 numpy = "*"
 scipy = "*"  # specify derivative dependencies here if you need them from conda
 
+[tool.pixi.package.host-dependencies]
+hatchling = "*"
+versioningit = "*"
+
+[tool.pixi.package.run-dependencies]
+python = ">=3.10"
+numpy = "*"
+
+[tool.pixi.package]
+name = "live_stream_analysis"
+version = "0.0.0"
+
+[tool.pixi.package.build]
+backend = { name = "pixi-build-python", version = "*" }
+
 [tool.pixi.tasks]
-# PyPi packaging tasks
-build-pypi = { cmd = "python -m build", description = "Build the package for PyPI" }
-pypi-build = { description = "Build the package for PyPI", depends-on = ["build-pypi"] }
-publish-pypi = { cmd = "twine upload dist/*", description = "Publish the package to PyPI", depends-on = ["build-pypi"] }
+# Documentation
+build-docs = { cmd = "sphinx-build -b html docs docs/_build", description = "Build documentation" }
+test-docs = { cmd = "sphinx-build -M doctest docs docs/_build", description = "Test building the documentation" }
+# Testing
+test = { cmd = "pytest", description = "Run the test suite" }
+# Packaging
+pypi-sdist = { cmd = "hatch build -t sdist", description = "Build the source distribution (tar.gz)" }
+pypi-wheel = { cmd = "hatch build -t wheel", description = "Build the wheel distribution" }
+pypi-build = { description = "Build the packages for PyPI", depends-on = ["pypi-sdist", "pypi-wheel"] }
+pypi-publish = { cmd = "twine upload dist/*", description = "Publish the package to PyPI", depends-on = ["pypi-build"] }
+pypi-publish-test = { cmd = "twine upload --repository testpypi dist/*", description = "Publish the package to TestPyPI", depends-on = ["pypi-build"] }
+conda-build-command = { cmd = "pixi build", description = "Build the conda package command" }
+conda-build = { description = "Build the conda package", depends-on = ["backup-toml", "sync-version", "conda-build-command", "reset-toml"] }
+conda-publish = { cmd = "anaconda upload *.conda", description = "Publish the .conda package to anaconda.org", depends-on = ["conda-build"] }
+# Misc
+audit-deps = { cmd = "pip-audit --local -s osv", description = "Audit the package dependencies for vulnerabilities" }
+# Cleaning
+clean = { cmd = "rm -rf .pytest_cache .ruff_cache **/*.egg-info **/dist **/__pycache__", description = "Clean up various caches and build artifacts" }
+clean-conda = { cmd = "rm -f *.conda", description = "Clean the local .conda build artifacts" }
+clean-docs = { cmd = "rm -rf docs/_build", description = "Clean up documentation build artifacts" }
 clean-pypi = { cmd = "rm -rf dist", description = "Clean the PyPI build artifacts" }
-# Conda packaging tasks
-# NOTE: for build-conda to work locally, you need to set pixi to use detached-environments, i.e. pixi config set detached-environments true
-#       this is because the conda build will complain about build environment in source and refuse to build.
-build-conda = { cmd = "cd conda.recipe && VERSION=$(versioningit ../) conda mambabuild --channel conda-forge --output-folder . .", description = "Build the package for conda" }
-conda-build = { description = "Build the package for conda", depends-on = ["build-conda"] }
-verify-conda = { cmd = "conda verify conda.recipe/noarch/*.tar.bz2", description = "Verify the conda package", depends-on = ["build-conda"] }
-publish-conda = { cmd = "anaconda upload conda.recipe/noarch/*/*.tar.bz2", description = "Publish the package to conda", depends-on = ["verify-conda"] }
-clean-conda = { cmd = "sh -c \"find conda.recipe/* ! -name 'meta.yaml' -exec rm -rf {} +\"", description = "Clean the conda build artifacts" }
-# Documentation tasks
-build-docs = { cmd = "sphinx-build -b html docs docs/_build", description = "Build the documentation" }
-clean-docs = { cmd = "rm -rf docs/_build", description = "Clean the documentation build artifacts" }
-# Testing tasks
-test = { cmd = "pytest", description = "Run the tests" }  # pytest config above takes care of the arguments
-audit-deps = { cmd = "pip-audit --local -s osv", description = "Audit dependencies for known vulnerabilities" }
-# Clean all
-clean-all = { description = "Clean all build artifacts", depends-on = ["clean-pypi", "clean-conda", "clean-docs"] }
+clean-all = { description = "Clean all artifacts", depends-on = ["clean", "clean-conda", "clean-docs", "clean-pypi"] }
+# workaround for dynamic versioning
+sync-version = { cmd = 'version=$(python -m versioningit); toml set tool.pixi.package.version "$version" --toml-path pyproject.toml', description = "Sync pyproject.toml version with Git version" }
+backup-toml = { cmd = "cp pyproject.toml pyproject.toml.bak", description = "Backup the pyproject.toml file" }
+reset-toml = { cmd = "cp pyproject.toml.bak pyproject.toml; rm pyproject.toml.bak", description = "Reset the pyproject.toml file to the original state" }
 
 [tool.pixi.feature.test.dependencies]
 pytest = "*"
@@ -135,19 +166,19 @@ pytest-xdist = "*"
 pytest-repeat = "*"
 
 [tool.pixi.feature.package.dependencies]
-boa = "*"
 anaconda-client = ">=1.13.0,<2"
-conda-build = "*"
-conda-verify = "*"
-python-build = "*"
+hatch = "*"
 twine = ">=6.1.0,<7"
+versioningit = "*"
+
+[tool.pixi.feature.package.pypi-dependencies]
+toml-cli = "*"
 
 [tool.pixi.feature.developer.dependencies]
-pip = "*"
+pip = ">=26.0"
 pip-audit = "*"
 versioningit = "*"
 pre-commit = "*"
-conda-tree = "*"
 ruff = "*"
 
 [tool.pixi.feature.docs.dependencies]
