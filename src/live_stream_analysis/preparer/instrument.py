@@ -367,7 +367,7 @@ def add_rows_for_ids_and_positions(
     sample_pos: tuple[float, float, float],
     beam_vec: tuple[float, float, float],
     beam_norm: float,
-    rows: list[tuple[int, float, float, float]],
+    rows: list[tuple[int, float, float, float, float]],
 ) -> None:
     """Convert detector ids/positions to geometry rows and append to output."""
     if len(detector_positions) != len(ids):
@@ -391,7 +391,9 @@ def add_rows_for_ids_and_positions(
         cos_theta = max(-1.0, min(1.0, cos_theta))
         theta_deg = math.degrees(math.acos(cos_theta))
         l_total = beam_norm + l2
-        rows.append((det_id, l2, theta_deg, l_total))
+        theta_rad = math.radians(theta_deg)
+        q_matrix_element = PI4 * math.sin(theta_rad / 2.0) * TOF_LAMBDA_CONVERSION_US_PER_M_ANGSTROM * l_total
+        rows.append((det_id, l2, theta_deg, l_total, q_matrix_element))
 
 
 def collect_component_rows(
@@ -404,7 +406,7 @@ def collect_component_rows(
     sample_pos: tuple[float, float, float],
     beam_vec: tuple[float, float, float],
     beam_norm: float,
-    rows: list[tuple[int, float, float, float]],
+    rows: list[tuple[int, float, float, float, float]],
 ) -> None:
     """Recursively collect detector rows from a component tree."""
     component_type = component_elem.get("type")
@@ -460,21 +462,28 @@ def find_component_position(root: ET.Element, component_type: str) -> tuple[floa
     return (0.0, 0.0, 0.0)
 
 
+def parse_l1_distance(root: ET.Element) -> tuple[tuple[float, float, float], tuple[float, float, float], float]:
+    """Return source/sample positions and source-to-sample distance L1."""
+    source_pos = find_component_position(root, "moderator")
+    sample_pos = find_component_position(root, "sample-position")
+    beam_vec = v_sub(sample_pos, source_pos)
+    l1 = v_norm(beam_vec)
+    if l1 == 0.0:
+        raise ValueError("Invalid IDF: source and sample overlap")
+    return source_pos, sample_pos, l1
+
+
 def build_detector_geometry(idf_path: Path):
-    """Parse IDF and return detector rows with id, L2, theta and Ltotal."""
+    """Parse IDF and return detector rows with id, L2, theta, Ltotal, and TOF-to-Q matrix element."""
     tree = ET.parse(idf_path)
     root = tree.getroot()
     type_map, idlists = build_type_and_id_maps(root)
     det_types = detector_type_names(type_map)
 
-    source_pos = find_component_position(root, "moderator")
-    sample_pos = find_component_position(root, "sample-position")
+    source_pos, sample_pos, beam_norm = parse_l1_distance(root)
     beam_vec = v_sub(sample_pos, source_pos)
-    beam_norm = v_norm(beam_vec)
-    if beam_norm == 0.0:
-        raise ValueError("Invalid IDF: source and sample overlap")
 
-    rows: list[tuple[int, float, float, float]] = []
+    rows: list[tuple[int, float, float, float, float]] = []
     top_components = [c for c in root if local_name(c.tag) == "component"]
     for comp in top_components:
         collect_component_rows(

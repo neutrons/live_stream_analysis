@@ -2,19 +2,16 @@
 
 import argparse
 import csv
-import math
 from pathlib import Path
 
 from .instrument import (
-    PI4,
-    TOF_LAMBDA_CONVERSION_US_PER_M_ANGSTROM,
     build_detector_geometry,
     build_synthetic_tof_spectrum,
 )
 
 
 def convert_to_iq(
-    geometry_rows: list[tuple[int, float, float, float]],
+    geometry_rows: list[tuple[int, float, float, float, float]],
     tof_centers_us: list[float],
     y_counts: list[float],
     q_bins: int,
@@ -26,11 +23,7 @@ def convert_to_iq(
     tof_min = min(tof_centers_us)
     tof_max = max(tof_centers_us)
 
-    factors: list[float] = []
-    for _, _, theta_deg, l_total in geometry_rows:
-        theta_rad = math.radians(theta_deg)
-        factor = PI4 * math.sin(theta_rad / 2.0) * TOF_LAMBDA_CONVERSION_US_PER_M_ANGSTROM * l_total
-        factors.append(factor)
+    factors = [q_matrix_element for _, _, _, _, q_matrix_element in geometry_rows]
 
     q_min = min(factors) / tof_max
     q_max = max(factors) / tof_min
@@ -54,15 +47,15 @@ def convert_to_iq(
     return q_centers, iq
 
 
-def write_pixel_geometry_csv(rows: list[tuple[int, float, float, float]], output_csv: Path) -> None:
+def write_pixel_geometry_csv(rows: list[tuple[int, float, float, float, float]], output_csv: Path) -> None:
     output_csv = output_csv.resolve()
     output_csv.parent.mkdir(parents=True, exist_ok=True)
 
     with output_csv.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["pixel id", "L2 value", "theta value"])
-        for det_id, l2, theta_deg, _ in rows:
-            writer.writerow([det_id, f"{l2:.8f}", f"{theta_deg:.8f}"])
+        writer.writerow(["pixel id", "L2 value", "theta value", "TOF-to-Q matrix element"])
+        for det_id, l2, theta_deg, _, q_matrix_element in rows:
+            writer.writerow([det_id, f"{l2:.8f}", f"{theta_deg:.8f}", f"{q_matrix_element:.8f}"])
 
 
 def write_iq_csv(q_centers: list[float], iq: list[float], output_csv: Path) -> None:

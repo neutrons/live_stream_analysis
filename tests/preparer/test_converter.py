@@ -32,7 +32,7 @@ def test_preparer_cli_writes_csv_outputs(tmp_path: Path) -> None:
     pixel_lines = pixel_csv.read_text(encoding="utf-8").strip().splitlines()
     iq_lines = iq_csv.read_text(encoding="utf-8").strip().splitlines()
 
-    assert pixel_lines[0] == "pixel id,L2 value,theta value"
+    assert pixel_lines[0] == "pixel id,L2 value,theta value,TOF-to-Q matrix element"
     assert iq_lines[0] == "Q value,I(Q)"
     assert len(pixel_lines) > 10
     assert len(iq_lines) == 121
