@@ -43,7 +43,8 @@ jobs:
         uses: peter-evans/create-pull-request@v8
         # PR targets the branch checked out in this workflow.
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # Prefer a PAT in PIXI_PR_TOKEN when GITHUB_TOKEN cannot create PRs.
+          token: ${{ secrets.PIXI_PR_TOKEN != '' && secrets.PIXI_PR_TOKEN || secrets.GITHUB_TOKEN }}
           commit-message: Update pixi lockfile
           title: Update pixi lockfile
           body-path: diff.md
