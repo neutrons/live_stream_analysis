@@ -2,6 +2,25 @@
 
 Repository for working on live stream analysis 
 
+## IDF Pre-Processing Helper
+
+The package includes a pure-Python helper CLI subcommand for pre-processing Mantid IDF XML files.
+It generates:
+
+1. Pixel geometry CSV with columns: pixel id, L2 value, theta value.
+2. Synthetic I(Q) CSV from a TOF-to-Q conversion workflow.
+
+Example:
+
+```bash
+pixi run live_stream_analysis preparer \
+    --idf-file tests/data/idf/NOMAD_Definition.xml \
+    --pixel-geometry-csv pixel_geometry.csv \
+    --iq-csv iq.csv
+```
+
+Note: current parser coverage is validated for NOMAD IDF fixtures. A POWGEN fixture is included in tests for parser study/regression coverage.
+
 ## Repository Adjustments
 
 ### Add an access token to anaconda

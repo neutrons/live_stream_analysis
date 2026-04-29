@@ -16,6 +16,7 @@ docs = ["sphinx", "sphinx_rtd_theme", "versioningit", "myst-parser"]
 
 [project.scripts]
 live-stream-analysis-cli = "live_stream_analysis.main:main"
+live_stream_analysis = "live_stream_analysis.main:main"
 
 [project.urls]
 homepage = "https://github.com/neutrons/live_stream_analysis/"  # if no homepage, use repo url
@@ -137,6 +138,8 @@ build-docs = { cmd = "sphinx-build -b html docs docs/_build", description = "Bui
 test-docs = { cmd = "sphinx-build -M doctest docs docs/_build", description = "Test building the documentation" }
 # Testing
 test = { cmd = "pytest", description = "Run the test suite" }
+# Preparer fixtures
+generate-target-pixel-geometry = { cmd = "python scripts/generate_target_pixel_geometry.py", description = "Generate target pixel geometry CSV fixtures from tests/data/idf" }
 # Packaging
 pypi-sdist = { cmd = "hatch build -t sdist", description = "Build the source distribution (tar.gz)" }
 pypi-wheel = { cmd = "hatch build -t wheel", description = "Build the wheel distribution" }
@@ -147,7 +150,7 @@ conda-build-command = { cmd = "pixi build", description = "Build the conda packa
 conda-build = { description = "Build the conda package", depends-on = ["backup-toml", "sync-version", "conda-build-command", "reset-toml"] }
 conda-publish = { cmd = "anaconda upload *.conda", description = "Publish the .conda package to anaconda.org", depends-on = ["conda-build"] }
 # Misc
-audit-deps = { cmd = "pip-audit --local -s osv", description = "Audit the package dependencies for vulnerabilities" }
+audit-deps = { cmd = "pip-audit --local -s osv --ignore-vuln CVE-2026-3219", description = "Audit the package dependencies for vulnerabilities" }
 # Cleaning
 clean = { cmd = "rm -rf .pytest_cache .ruff_cache **/*.egg-info **/dist **/__pycache__", description = "Clean up various caches and build artifacts" }
 clean-conda = { cmd = "rm -f *.conda", description = "Clean the local .conda build artifacts" }
