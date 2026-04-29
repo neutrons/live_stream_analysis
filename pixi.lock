@@ -3225,7 +3225,7 @@ packages:
   timestamp: 1753294907822
 - pypi: ./
   name: live-stream-analysis
-  version: 0.2.0.dev20260428175237
+  version: 0.1.0
   sha256: b48cfcee6af08d51dada9f023773dc7988aee1884f6132539e65aaff5a81ec96
   requires_dist:
   - numpy>=2.2.6,<3
