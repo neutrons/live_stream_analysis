@@ -74,6 +74,8 @@ docs/_build/
 # PyBuilder
 .pybuilder/
 target/
+!tests/data/target/
+!tests/data/target/*.csv
 
 # Jupyter Notebook
 .ipynb_checkpoints
