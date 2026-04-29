@@ -21,6 +21,36 @@ pixi run live_stream_analysis preparer \
 
 Note: current parser coverage is validated for NOMAD IDF fixtures. A POWGEN fixture is included in tests for parser study/regression coverage.
 
+# Accessing Adara streams for NOMAD Fe2O3 (Linux)
+
+If you want to use the ORC Shares NFS, you can:
+  A.1. Go into "Share" tab, create share w/ "NFS" share type + sub-type of "Perf-NFS" and pick the amount of storage (I did all 300GB available)
+  A.2. After it is created, add a "Rule" to share; I did "ip" and just let it be "0.0.0.0/0" for all IP to mount it (note: 0.0.0.0 won't work, the "/0" is required but UI doesn't tell you)
+  A.3. Click on the Share in the UI and make note / copy  the "Path" w/ an IP address/path format (edited) 
+
+Then, on a server (either an existing one or creating one; I created one and used Ubuntu 24.04):
+  B.1. Add tools via sudo apt install nfs-common to mount NFS
+  B.2. Create a directory i.e. /path_for_mount
+  B.3. Mount the share via `sudo mount -t nfs <share path from (A.3) above> <path for mount in step (B.2) above>
+
+Then if everything worked, you can add files to the mount!
+We tested via then mounting the share using step B.3 to my laptop and read the files I made using the share on the server above
+
+Then, you can use the [readadara]() by Alex Sohbani that we have a copy-paste version of in `live_stream_analysis`
+```
+pixi run python
+```
+...and then
+```
+from live_stream_analysis.readadara import AdaraFileReader
+
+# This will be path in B.2 above and then the `adara_streams/...` path for files on the NFS share
+filename = "/path_for_mount/adara_streams/NOMAD.Raw.Data.Runs.208511-208543/20250131-101613.350178410-run-208511/m00000001-f00000001-run-208511.adara")
+reader = AdaraFileReader(filename)
+for packet in reader.read_generator()
+    print(packet.to_dict())
+```
+
 ## Repository Adjustments
 
 ### Add an access token to anaconda
