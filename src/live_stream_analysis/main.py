@@ -2,7 +2,7 @@
 
 import argparse
 
-from live_stream_analysis import preparer
+from live_stream_analysis import analyzer, preparer
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -11,6 +11,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     preparer.add_parser(subparsers)
+    analyzer.add_parser(subparsers)
 
     return parser
 
@@ -22,6 +23,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if getattr(args, "_cmd", None) == "preparer":
         return preparer.run_from_namespace(args)
+
+    if getattr(args, "_cmd", None) == "analyze":
+        return analyzer.run_from_namespace(args)
 
     parser.print_help()
     return 1
