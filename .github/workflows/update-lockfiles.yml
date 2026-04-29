@@ -7,34 +7,41 @@ permissions:
 on:
   workflow_dispatch:
   schedule:
-    - cron: 0 5 1 * *
+    - cron: "0 5 1 * *"
 
 jobs:
-        - name: Checkout
-          uses: actions/checkout@v6
-          # checks out refspec that triggered or the default branch
-
-        - name: Setup pixi
-          uses: prefix-dev/setup-pixi@v0.9.5
+  update-lockfiles:
+    runs-on: ubuntu-latest
+    steps:
       - name: Checkout
         uses: actions/checkout@v6
-
-        # checks out refspec that triggered or the default branch
+        # Checks out the ref that triggered the workflow (or default branch).
 
       - name: Setup pixi
         uses: prefix-dev/setup-pixi@v0.9.5
 
-        with:
-          uses: peter-evans/create-pull-request@v8
-          # PR will target the branch checked out in the workflow
-
       - name: Update lockfiles
         run: |
-          set -o pipefail
-          pixi update --json | pixi exec pixi-diff-to-markdown >> diff.md
+          set -euo pipefail
+          pixi update
 
+      - name: Build PR body
+        run: |
+          {
+            echo "## Lockfile update"
+            echo
+            echo "This PR updates \\`pixi.lock\\` using \\`pixi update\\`."
+            echo
+            echo "### Diff"
+            echo
+            echo "\\`\\`\\`diff"
+            git --no-pager diff -- pixi.lock
+            echo "\\`\\`\\`"
+          } > diff.md
+
+      - name: Create pull request
         uses: peter-evans/create-pull-request@v8
-        # PR will target the branch checked out in the workflow
+        # PR targets the branch checked out in this workflow.
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: Update pixi lockfile
