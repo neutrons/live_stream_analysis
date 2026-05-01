@@ -219,6 +219,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/14/2f/967ba146e6d58cf6a652da73885f52fc68001525b4197effc174321d70b4/jmespath-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/fb/86/dd6e5db36df29e76c7a7699123569a4a18c1623ce68d826ed96c62643cae/mdit_py_plugins-0.5.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/d3/ac/686789b9145413f1a61878c407210e41bfdb097976864e0913078b24098c/myst_parser-5.0.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/44/31/54e17a4434df64f8b6a3bc761aa5630a4939dd35f5672add5e62626adf20/readadara-0.0.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/8e/3b/2b3dac0b82d41ab43aa87c6ecde63d71189d03fe8854b8ca455a315edac3/regex-2026.4.4-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/d2/b8/f0b9b880c03a3db8eaff63d76ca751ac7d8e45483fb7a0bb9f8e5c6ce433/toml_cli-0.8.2-py3-none-any.whl
       - pypi: ./
@@ -423,6 +424,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/14/2f/967ba146e6d58cf6a652da73885f52fc68001525b4197effc174321d70b4/jmespath-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/fb/86/dd6e5db36df29e76c7a7699123569a4a18c1623ce68d826ed96c62643cae/mdit_py_plugins-0.5.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/d3/ac/686789b9145413f1a61878c407210e41bfdb097976864e0913078b24098c/myst_parser-5.0.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/44/31/54e17a4434df64f8b6a3bc761aa5630a4939dd35f5672add5e62626adf20/readadara-0.0.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/b4/d6/5cfbfc97f3201a4d24b596a77957e092030dcc4205894bc035cedcfce62f/regex-2026.4.4-cp314-cp314-macosx_11_0_arm64.whl
       - pypi: https://files.pythonhosted.org/packages/d2/b8/f0b9b880c03a3db8eaff63d76ca751ac7d8e45483fb7a0bb9f8e5c6ce433/toml_cli-0.8.2-py3-none-any.whl
       - pypi: ./
@@ -651,6 +653,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-3.23.1-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/zlib-ng-2.3.3-hceb46e0_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.7-hb78ec9c_6.conda
+      - pypi: https://files.pythonhosted.org/packages/44/31/54e17a4434df64f8b6a3bc761aa5630a4939dd35f5672add5e62626adf20/readadara-0.0.1-py3-none-any.whl
       - pypi: ./
       osx-arm64:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/_openmp_mutex-4.5-7_kmp_llvm.conda
@@ -865,6 +868,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-3.23.1-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zlib-ng-2.3.3-hed4e4f5_1.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstd-1.5.7-hbf9d68e_6.conda
+      - pypi: https://files.pythonhosted.org/packages/44/31/54e17a4434df64f8b6a3bc761aa5630a4939dd35f5672add5e62626adf20/readadara-0.0.1-py3-none-any.whl
       - pypi: ./
 packages:
 - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda
@@ -3225,10 +3229,11 @@ packages:
   timestamp: 1753294907822
 - pypi: ./
   name: live-stream-analysis
-  version: 0.1.0
-  sha256: b48cfcee6af08d51dada9f023773dc7988aee1884f6132539e65aaff5a81ec96
+  version: 0.2.0.dev20260501043144
+  sha256: 041b2163d4023bdd3e35b3055977cb1f98a83c348b3aee6630237a60cd9ecc13
   requires_dist:
   - numpy>=2.2.6,<3
+  - readadara>=0.0.1
   - myst-parser ; extra == 'docs'
   - sphinx ; extra == 'docs'
   - sphinx-rtd-theme ; extra == 'docs'
@@ -4405,6 +4410,10 @@ packages:
   license: LicenseRef-Qhull
   size: 516376
   timestamp: 1720814307311
+- pypi: https://files.pythonhosted.org/packages/44/31/54e17a4434df64f8b6a3bc761aa5630a4939dd35f5672add5e62626adf20/readadara-0.0.1-py3-none-any.whl
+  name: readadara
+  version: 0.0.1
+  sha256: 60efc809d4f5b010119c2a91a2a2d51361ab8aa5afc7331cbd1ab4f13b3e2ec1
 - conda: https://conda.anaconda.org/conda-forge/noarch/readchar-4.2.2-pyhcf101f3_0.conda
   sha256: ea85cacf3cc5bcd472622e58592a1966fdb196fe62facb7de9a30133dec46ff6
   md5: b71e7f9e2ba9425275f7318f4461877f

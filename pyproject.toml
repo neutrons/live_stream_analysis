@@ -9,6 +9,7 @@ readme = "README.md"
 dependencies = [
   # Dependencies available from both PyPI and conda should be listed here
   "numpy>=2.2.6,<3",
+  "readadara>=0.0.1",
 ]
 
 [project.optional-dependencies]

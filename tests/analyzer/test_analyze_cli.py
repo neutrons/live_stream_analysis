@@ -7,9 +7,12 @@ from pathlib import Path
 
 import pytest
 
+from readadara import AdaraFileReader
+
+from live_stream_analysis.analyzer.adara import _build_reader
 from live_stream_analysis.main import build_parser, main
 
-from tests.readadara.adara_fixtures import event_packet, null_packet, rtdl_packet
+from tests.analyzer.adara_fixtures import event_packet, null_packet, rtdl_packet
 
 
 def _write_adara(tmp_path: Path, *packets: bytes) -> Path:
@@ -55,6 +58,12 @@ class TestAnalyzeParser:
 # ---------------------------------------------------------------------------
 
 class TestAdaraFileCLI:
+    def test_build_reader_returns_external_readadara_file_reader(self, tmp_path: Path):
+        path = _write_adara(tmp_path, null_packet())
+        args = build_parser().parse_args(["analyze", "--adara-file", str(path)])
+        reader = _build_reader(args)
+        assert isinstance(reader, AdaraFileReader)
+
     def test_analyze_file_exits_zero(self, tmp_path: Path):
         path = _write_adara(tmp_path, rtdl_packet(), event_packet([(1, 100)]))
         rc = main(["analyze", "--adara-file", str(path)])

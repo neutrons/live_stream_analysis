@@ -7,7 +7,7 @@ import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..readadara import AdaraFileReader, AdaraLiveStreamReader
+    from readadara import AdaraFileReader, AdaraLiveStreamReader
 
 
 def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -40,7 +40,7 @@ def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
 
 def _build_reader(args: argparse.Namespace):
     """Construct the appropriate ADARA reader from parsed arguments."""
-    from ..readadara import AdaraFileReader, AdaraLiveStreamReader
+    from readadara import AdaraFileReader, AdaraLiveStreamReader
 
     has_file = args.adara_file is not None
     has_stream = args.adara_stream is not None
