@@ -29,7 +29,7 @@ If you want to use the ORC Shares NFS, you can:
   A.3. Click on the Share in the UI and make note / copy  the "Path" w/ an IP address/path format (edited) 
 
 Then, on a server (either an existing one or creating one; I created one and used Ubuntu 24.04):
-  B.1. Add tools via sudo apt install nfs-common to mount NFS
+  B.1. Add tools via `sudo apt install nfs-common` to mount NFS
   B.2. Create a directory i.e. /path_for_mount
   B.3. Mount the share via `sudo mount -t nfs <share path from (A.3) above> <path for mount in step (B.2) above>
 
