@@ -36,13 +36,13 @@ Then, on a server (either an existing one or creating one; I created one and use
 Then if everything worked, you can add files to the mount!
 We tested via then mounting the share using step B.3 to my laptop and read the files I made using the share on the server above
 
-Then, you can use the [readadara]() by Alex Sohbani that we have a copy-paste version of in `live_stream_analysis`
+Then, you can use the [readadara](https://github.com/bsobhani/readadara) package by Alex Sohbani:
 ```
 pixi run python
 ```
 ...and then
 ```
-from live_stream_analysis.readadara import AdaraFileReader
+from readadara import AdaraFileReader
 
 # This will be path in B.2 above and then the `adara_streams/...` path for files on the NFS share
 filename = "/path_for_mount/adara_streams/NOMAD.Raw.Data.Runs.208511-208543/20250131-101613.350178410-run-208511/m00000001-f00000001-run-208511.adara")
