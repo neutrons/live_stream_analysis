@@ -118,7 +118,7 @@ def run_preparer(
     return len(geometry_rows), len(q_centers)
 
 
-def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> argparse.ArgumentParser:
+def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
     """Register the preparer subcommand parser."""
     parser = subparsers.add_parser(
         "preparer",
