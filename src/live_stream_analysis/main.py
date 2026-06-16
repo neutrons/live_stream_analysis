@@ -7,7 +7,10 @@ from live_stream_analysis import analyzer, preparer
 
 def build_parser() -> argparse.ArgumentParser:
     """Build top-level parser and subcommands."""
-    parser = argparse.ArgumentParser(prog="live_stream_analysis", description="Live stream analysis command line tools.")
+    parser = argparse.ArgumentParser(
+        prog="live_stream_analysis",
+        description="Live stream analysis command line tools.",
+    )
     subparsers = parser.add_subparsers(dest="command")
 
     preparer.add_parser(subparsers)

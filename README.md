@@ -1,6 +1,6 @@
 # live stream analysis
 
-Repository for working on live stream analysis 
+Repository for working on live stream analysis
 
 ## IDF Pre-Processing Helper
 

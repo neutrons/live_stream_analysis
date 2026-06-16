@@ -1,6 +1,6 @@
 import math
-from pathlib import Path
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 from live_stream_analysis.preparer.instrument import (
     PI4,
@@ -57,10 +57,7 @@ def test_matrix_element_matches_formula_for_known_nomad_detector() -> None:
 
     expected_l_total = l1 + l2
     expected_q_matrix_element = (
-        PI4
-        * math.sin(math.radians(theta_deg) / 2.0)
-        * TOF_LAMBDA_CONVERSION_US_PER_M_ANGSTROM
-        * expected_l_total
+        PI4 * math.sin(math.radians(theta_deg) / 2.0) * TOF_LAMBDA_CONVERSION_US_PER_M_ANGSTROM * expected_l_total
     )
 
     assert math.isclose(l_total, expected_l_total, rel_tol=1e-12, abs_tol=1e-12)

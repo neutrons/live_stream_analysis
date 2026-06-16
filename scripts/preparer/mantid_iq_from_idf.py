@@ -8,8 +8,8 @@ import csv
 import math
 from pathlib import Path
 
-from mantid.simpleapi import ConvertUnits, CreateSampleWorkspace, LoadInstrument, SumSpectra
 import matplotlib.pyplot as plt
+from mantid.simpleapi import ConvertUnits, CreateSampleWorkspace, LoadInstrument, SumSpectra
 
 
 def find_idf_dir() -> Path:

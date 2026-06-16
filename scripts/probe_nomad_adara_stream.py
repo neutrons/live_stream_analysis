@@ -14,7 +14,6 @@ import threading
 import time
 from dataclasses import dataclass
 
-
 DEFAULT_HOSTS = [
     "bl1b-daq1.sns.gov",
     "bl1b-daq0.sns.gov",
@@ -117,7 +116,9 @@ def _try_stream_read(host: str, port: int, timeout_s: float) -> tuple[bool, str]
         return False, f"Timed out waiting for first packet after {timeout_s:.1f}s"
 
 
-def probe_endpoint(host: str, port: int, connect_timeout: float, stream_timeout: float, read_stream: bool) -> ProbeResult:
+def probe_endpoint(
+    host: str, port: int, connect_timeout: float, stream_timeout: float, read_stream: bool
+) -> ProbeResult:
     start = time.perf_counter()
 
     try:
@@ -222,10 +223,7 @@ def main() -> int:
     preferred = successful_streams[0] if successful_streams else (successful_tcp[0] if successful_tcp else None)
     if preferred is not None:
         print("Recommended CLI test command:")
-        print(
-            "pixi run live_stream_analysis analyze --adara-stream "
-            f"{preferred.host} {preferred.port}"
-        )
+        print(f"pixi run live_stream_analysis analyze --adara-stream {preferred.host} {preferred.port}")
         return 0
 
     print("No working endpoint found from provided candidates.")

@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-import struct
 from pathlib import Path
 
 import pytest
-
 from readadara import AdaraFileReader
 
 from live_stream_analysis.analyzer.adara import _build_reader
 from live_stream_analysis.main import build_parser, main
-
 from tests.analyzer.adara_fixtures import event_packet, null_packet, rtdl_packet
 
 
@@ -25,14 +22,13 @@ def _write_adara(tmp_path: Path, *packets: bytes) -> Path:
 # Parser registration
 # ---------------------------------------------------------------------------
 
+
 class TestAnalyzeParser:
     def test_subcommand_registered(self):
         parser = build_parser()
         # parse_known_args returns without error when 'analyze' is listed
         # actual required args are not present, so we check via choices
-        subparsers_action = next(
-            a for a in parser._actions if hasattr(a, "_name_parser_map")
-        )
+        subparsers_action = next(a for a in parser._actions if hasattr(a, "_name_parser_map"))
         assert "analyze" in subparsers_action._name_parser_map
 
     def test_requires_one_source(self):
@@ -46,8 +42,11 @@ class TestAnalyzeParser:
             main(
                 [
                     "analyze",
-                    "--adara-file", str(path),
-                    "--adara-stream", "localhost", "31415",
+                    "--adara-file",
+                    str(path),
+                    "--adara-stream",
+                    "localhost",
+                    "31415",
                 ]
             )
         assert exc_info.value.code != 0
@@ -56,6 +55,7 @@ class TestAnalyzeParser:
 # ---------------------------------------------------------------------------
 # --adara-file path
 # ---------------------------------------------------------------------------
+
 
 class TestAdaraFileCLI:
     def test_build_reader_returns_external_readadara_file_reader(self, tmp_path: Path):

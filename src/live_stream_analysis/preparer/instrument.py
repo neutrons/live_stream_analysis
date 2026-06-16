@@ -1,9 +1,8 @@
 """IDF pre-processing helpers for geometry CSV and synthetic TOF spectrum output."""
 
 import math
-from pathlib import Path
 import xml.etree.ElementTree as ET
-
+from pathlib import Path
 
 TOF_LAMBDA_CONVERSION_US_PER_M_ANGSTROM = 252.777
 PI4 = 4.0 * math.pi

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from readadara import AdaraFileReader, AdaraLiveStreamReader
+    pass
 
 
 def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -87,9 +87,7 @@ def _load_q_matrix_constants(pixel_geometry_csv: str) -> list[float]:
         reader = csv.DictReader(handle)
         required_columns = {"pixel id", "TOF-to-Q matrix element"}
         if reader.fieldnames is None or not required_columns.issubset(set(reader.fieldnames)):
-            raise ValueError(
-                "Pixel geometry CSV must include columns: 'pixel id' and 'TOF-to-Q matrix element'"
-            )
+            raise ValueError("Pixel geometry CSV must include columns: 'pixel id' and 'TOF-to-Q matrix element'")
 
         for row in reader:
             pixel_id = int(row["pixel id"])
@@ -151,6 +149,78 @@ def _accumulate_histogram(
     return packet_count, total_events, histogram_events, hist
 
 
+def _validate_histogram_args(args: argparse.Namespace) -> tuple[int, bool]:
+    if args.histogram_q_bin_size <= 0:
+        raise ValueError("--histogram-q-bin-size must be > 0")
+    if args.histogram_q_max <= 0:
+        raise ValueError("--histogram-q-max must be > 0")
+    if args.tof_tick_us <= 0:
+        raise ValueError("--tof-tick-us must be > 0")
+
+    histogram_bins_f = args.histogram_q_max / args.histogram_q_bin_size
+    histogram_bins = int(round(histogram_bins_f))
+    if histogram_bins <= 0 or not math.isclose(histogram_bins_f, float(histogram_bins), rel_tol=1e-9, abs_tol=1e-9):
+        raise ValueError("--histogram-q-max must be an integer multiple of --histogram-q-bin-size")
+
+    return histogram_bins, True
+
+
+def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
+    try:
+        histogram_bins, _ = _validate_histogram_args(args)
+        q_matrix_constants = _load_q_matrix_constants(args.histogram_pixel_geometry_csv)
+        packet_count, total_events, histogram_events, hist = _accumulate_histogram(
+            reader=reader,
+            q_matrix_constants=q_matrix_constants,
+            histogram_bins=histogram_bins,
+            histogram_q_bin_size=args.histogram_q_bin_size,
+            tof_tick_us=args.tof_tick_us,
+        )
+    except KeyboardInterrupt:
+        print("Interrupted by user", file=sys.stderr)
+        return 130
+    except (OSError, ValueError) as exc:
+        print(f"Error reading stream: {exc}", file=sys.stderr)
+        return 1
+
+    if args.histogram_output_txt is not None:
+        try:
+            _write_histogram_txt(hist, args.histogram_output_txt)
+        except OSError as exc:
+            print(f"Error writing histogram output: {exc}", file=sys.stderr)
+            return 1
+
+    print(f"Packets read         : {packet_count}")
+    print(f"Total events         : {total_events}")
+    print(f"Histogrammed events  : {histogram_events}")
+    print(f"Histogram bins       : {histogram_bins}")
+    print(f"Histogram Q bin size : {args.histogram_q_bin_size}")
+    print(f"Histogram Q max      : {args.histogram_q_max}")
+    print(f"TOF tick size (us)   : {args.tof_tick_us}")
+    if args.histogram_output_txt is not None:
+        print(f"Histogram TXT        : {Path(args.histogram_output_txt).resolve()}")
+    return 0
+
+
+def _run_basic_mode(reader) -> int:
+    packet_count = 0
+    event_count = 0
+    try:
+        for packet in reader.read_generator():
+            packet_count += 1
+            events = packet.get_events()
+            event_count += len(events)
+    except KeyboardInterrupt:
+        pass
+    except OSError as exc:
+        print(f"Error reading stream: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"Packets read : {packet_count}")
+    print(f"Total events : {event_count}")
+    return 0
+
+
 def _build_reader(args: argparse.Namespace):
     """Construct the appropriate ADARA reader from parsed arguments."""
     from readadara import AdaraFileReader, AdaraLiveStreamReader
@@ -183,75 +253,7 @@ def run_from_namespace(args: argparse.Namespace) -> int:
         print(f"Error creating ADARA reader: {exc}", file=sys.stderr)
         return 1
 
-    run_histogram = args.histogram_pixel_geometry_csv is not None
+    if args.histogram_pixel_geometry_csv is not None:
+        return _run_histogram_mode(reader, args)
 
-    if run_histogram:
-        if args.histogram_q_bin_size <= 0:
-            print("Error: --histogram-q-bin-size must be > 0", file=sys.stderr)
-            return 1
-        if args.histogram_q_max <= 0:
-            print("Error: --histogram-q-max must be > 0", file=sys.stderr)
-            return 1
-        if args.tof_tick_us <= 0:
-            print("Error: --tof-tick-us must be > 0", file=sys.stderr)
-            return 1
-
-        histogram_bins_f = args.histogram_q_max / args.histogram_q_bin_size
-        histogram_bins = int(round(histogram_bins_f))
-        if histogram_bins <= 0 or not math.isclose(histogram_bins_f, float(histogram_bins), rel_tol=1e-9, abs_tol=1e-9):
-            print(
-                "Error: --histogram-q-max must be an integer multiple of --histogram-q-bin-size",
-                file=sys.stderr,
-            )
-            return 1
-
-        try:
-            q_matrix_constants = _load_q_matrix_constants(args.histogram_pixel_geometry_csv)
-            packet_count, total_events, histogram_events, hist = _accumulate_histogram(
-                reader=reader,
-                q_matrix_constants=q_matrix_constants,
-                histogram_bins=histogram_bins,
-                histogram_q_bin_size=args.histogram_q_bin_size,
-                tof_tick_us=args.tof_tick_us,
-            )
-        except KeyboardInterrupt:
-            print("Interrupted by user", file=sys.stderr)
-            return 130
-        except (OSError, ValueError) as exc:
-            print(f"Error reading stream: {exc}", file=sys.stderr)
-            return 1
-
-        if args.histogram_output_txt is not None:
-            try:
-                _write_histogram_txt(hist, args.histogram_output_txt)
-            except OSError as exc:
-                print(f"Error writing histogram output: {exc}", file=sys.stderr)
-                return 1
-
-        print(f"Packets read         : {packet_count}")
-        print(f"Total events         : {total_events}")
-        print(f"Histogrammed events  : {histogram_events}")
-        print(f"Histogram bins       : {histogram_bins}")
-        print(f"Histogram Q bin size : {args.histogram_q_bin_size}")
-        print(f"Histogram Q max      : {args.histogram_q_max}")
-        print(f"TOF tick size (us)   : {args.tof_tick_us}")
-        if args.histogram_output_txt is not None:
-            print(f"Histogram TXT        : {Path(args.histogram_output_txt).resolve()}")
-        return 0
-
-    packet_count = 0
-    event_count = 0
-    try:
-        for packet in reader.read_generator():
-            packet_count += 1
-            events = packet.get_events()
-            event_count += len(events)
-    except KeyboardInterrupt:
-        pass
-    except OSError as exc:
-        print(f"Error reading stream: {exc}", file=sys.stderr)
-        return 1
-
-    print(f"Packets read : {packet_count}")
-    print(f"Total events : {event_count}")
-    return 0
+    return _run_basic_mode(reader)

@@ -1,4 +1,4 @@
-name: live-stream-analysis 
+name: live-stream-analysis
 channels:
   - conda-forge
 dependencies:
