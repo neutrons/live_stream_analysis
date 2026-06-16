@@ -13,7 +13,7 @@ It generates:
 Example:
 
 ```bash
-pixi run live_stream_analysis preparer \
+uv run live_stream_analysis preparer \
     --idf-file tests/data/idf/NOMAD_Definition.xml \
     --pixel-geometry-csv pixel_geometry.csv \
     --iq-csv iq.csv
@@ -23,7 +23,7 @@ For ADARA histogram workflows where TOF ticks are 0.1 microseconds, pre-scale th
 TOF-to-Q matrix element by 10 during CSV generation:
 
 ```bash
-pixi run live_stream_analysis preparer \
+uv run live_stream_analysis preparer \
     --idf-file tests/data/idf/NOMAD_Definition.xml \
     --pixel-geometry-csv pixel_geometry.csv \
     --iq-csv iq.csv \
@@ -33,7 +33,7 @@ pixi run live_stream_analysis preparer \
 Then run histogram analysis from an ADARA file (or use `--adara-stream HOST PORT`):
 
 ```bash
-pixi run live_stream_analysis analyze \
+uv run live_stream_analysis analyze \
     --adara-file /path/to/file.adara \
     --histogram-pixel-geometry-csv pixel_geometry.csv \
     --histogram-q-bin-size 0.02 \
@@ -63,7 +63,7 @@ We tested via then mounting the share using step B.3 to my laptop and read the f
 
 Then, you can use the [readadara](https://github.com/bsobhani/readadara) package by Alex Sohbani:
 ```
-pixi run python
+uv run python
 ```
 ...and then
 ```
@@ -78,10 +78,10 @@ for packet in reader.read_generator()
 
 ## Repository Adjustments
 
-### Add an access token to anaconda
+### Optional: Add an access token to Anaconda
 
-Here we assume your intent is to upload the conda package to the [anaconda.org/neutrons](https://anaconda.org/neutrons) organization.
-An administrator of `anaconda.org/neutrons` must create an access token for your repository in the [access settings](https://anaconda.org/neutrons/settings/access).
+If you plan to upload conda artifacts to [anaconda.org/neutrons](https://anaconda.org/neutrons),
+an administrator of `anaconda.org/neutrons` must create an access token for your repository in the [access settings](https://anaconda.org/neutrons/settings/access).
 
 After created, the token must be stored in a `repository secret`:
 
@@ -102,17 +102,18 @@ to create the access token.
 
 ## Packaging building instructions
 
-The default package publishing service is anaconda.
-However, we also support PyPI publishing as well.
+The default packaging flow in this repository is uv + PyPI-style distributions.
+Conda publishing is optional and can be handled separately when needed.
 
 ### Instruction for publish to PyPI
 
 1. Make sure you have the correct access to the project on PyPI.
 1. Make sure `git status` returns a clean state.
-1. At the root of the repo, use `python -m build` to generate the wheel.
-1. Check the wheel with `twine check dist/*`, everything should pass before we move to next step.
+1. At the root of the repo, run `uv sync --group package`.
+1. Build distributions with `uv run python -m build`.
+1. Check the wheel with `uv run twine check dist/*`, everything should pass before we move to next step.
 1. When doing manual upload test, make sure to use testpypi instead of pypi.
-1. Use `twine upload --repository testpypi dist/*` to upload to testpypi, you will need to specify the testpipy url in your `~/.pypirc`, i.e.
+1. Use `uv run twine upload --repository testpypi dist/*` to upload to testpypi, you will need to specify the testpipy url in your `~/.pypirc`, i.e.
 
 ``````
 [distutils]
@@ -130,62 +131,35 @@ index-servers = pypi, testpypi
 
 ### Instruction for publish to Anaconda
 
-Publishing to Anaconda is handled via workflow, `package.yml`.
-If your target channel is not `neutrons`, make sure change it in the `package_pixi.yml` file.
+Publishing to Anaconda is optional and handled via workflow, `package.yml`.
+If your target channel is not `neutrons`, update the upload workflow configuration accordingly.
 
 ## Development environment setup
 
 ### Build development environment
 
-1. By default, we recommend providing a single `environment.yml` that covers all necessary packages for development.
-2. The runtime dependency should be in `meta.yaml` for anaconda packaging, and `pyproject.toml` for PyPI publishing.
-3. When performing editable install for your feature branch, make sure to use `pip install --no-deps -e .` to ensure that `pip` does not install additional packages from `pyproject.toml` into development environment by accident.
+1. Install `uv` from the [official docs](https://docs.astral.sh/uv/getting-started/installation/).
+1. Create/update the local environment with `uv sync`.
+1. Run tests with `uv run pytest`.
+1. For docs, include the docs dependency group: `uv sync --group docs`.
+1. For packaging checks, include the package group: `uv sync --group package`.
 
-## Pixi
+## UV
 
-Pixi is a tool that helps to manage the project's dependencies and environment.
-This project uses Pixi with `pyproject.toml` as the single source of truth for dependencies and packaging.
+This project uses uv for lockfile management and development environments, with `pyproject.toml` as the source of truth for dependencies and packaging.
 
-### How to use Pixi
+### How to use UV
 
-1. Install `pixi` by running `curl -fsSL https://pixi.sh/install.sh | bash` (or following the instruction on the [official website](https://pixi.sh/))
-1. If planning to build the conda package locally, you need to configure the `pixi` to use the `detached-environments` as `conda build` will fail if the environment is in the source tree (which `pixi` does by default).
-    2.1. Run `pixi config set detached-environments true`
-    2.2. Make sure to commit the config file `.pixi/config.toml` to the repository (it is ignored by default).
-1. Run `pixi install` to install the dependencies.
-1. Adjust the tasks in `pyproject.toml` to match your project's needs.
-   3.1. Detailed instructions on adding tasks can be found in the [official documentation](https://pixi.sh/latest/features/tasks/).
-   3.2. You can use `pixi run` to see available tasks, and use `pixi run <task-name>` to run a specific task (note: if the selected task has dependencies, they will be run first).
+1. Install `uv` by following the [official documentation](https://docs.astral.sh/uv/getting-started/installation/).
+1. Run `uv sync` to install default development and test dependencies.
+1. Run commands in the project environment with `uv run ...`.
+1. Include optional groups as needed:
+   1. `uv sync --group docs` for documentation tooling.
+   1. `uv sync --group package` for build/twine tooling.
+   1. `uv sync --group jupyter` for notebook tooling.
 
     ```bash
-    ❯ pixi run
-
-    Available tasks:
-            conda-build
-            build-docs
-            build-pypi
-            clean-all
-            clean-conda
-            clean-docs
-            clean-pypi
-            conda-publish
-            publish-pypi
-            test
+    uv sync
+    uv run pytest
+    uv run live_stream_analysis --help
     ```
-
-1. Remember to remove the GitHub actions that still use `conda` actions.
-
-### Pixi environment location
-
-By default, `pixi` will create a virtual environment in the `.pixi` directory at the root of the repository.
-However, when setting `detached-environments` to `true`, `pixi` will create the virtual environment in the cache directory (see [official documentation](https://pixi.sh/latest/features/environment/#caching-packages) for more information).
-If you want to keep your environment between sessions, you should add the following lines to your `.bashrc` or `.bash_profile`:
-
-```bash
-export PIXI_CACHE_DIR="$HOME/.pixi/cache"
-```
-
-### Known issues
-
-On SNS Analysis systems, the `pixi run conda-build` task may fail due to `sqlite3` file locking issue.
-This is most likely due to the user directory being a shared mount, which interfering with `pixi` and `conda` environment locking.

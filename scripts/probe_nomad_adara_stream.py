@@ -223,7 +223,7 @@ def main() -> int:
     preferred = successful_streams[0] if successful_streams else (successful_tcp[0] if successful_tcp else None)
     if preferred is not None:
         print("Recommended CLI test command:")
-        print(f"pixi run live_stream_analysis analyze --adara-stream {preferred.host} {preferred.port}")
+        print(f"uv run live_stream_analysis analyze --adara-stream {preferred.host} {preferred.port}")
         return 0
 
     print("No working endpoint found from provided candidates.")

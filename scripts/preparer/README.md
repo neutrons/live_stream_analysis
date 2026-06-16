@@ -7,25 +7,15 @@ Use a separate environment only when running these scripts.
 
 IDF XML files are stored in `tests/data/idf` inside this repository.
 
-## Option 1: Use a Pixi environment in this repository
+## Create a standalone Conda environment
 
-From the `live_stream_analysis` repository root:
-
-```bash
-pixi install
-pixi add --channel conda-forge --channel mantid mantid matplotlib
-python scripts/preparer/mantid_iq_from_idf.py --idf-file tests/data/idf/NOMAD_Definition.xml
-python scripts/preparer/mantid_iq_from_idf.py --idf-file tests/data/idf/NOMAD_Definition.xml --plot
-```
-
-## Option 2: Create a standalone Conda environment
-
-If you do not use Pixi, create a separate environment just for this script:
+Create a separate environment just for this script:
 
 ```bash
 conda create -n mantid-preparer -c conda-forge -c mantid mantid matplotlib python=3.11
 conda activate mantid-preparer
 python scripts/preparer/mantid_iq_from_idf.py --idf-file tests/data/idf/NOMAD_Definition.xml
+python scripts/preparer/mantid_iq_from_idf.py --idf-file tests/data/idf/NOMAD_Definition.xml --plot
 ```
 
 ## Script location

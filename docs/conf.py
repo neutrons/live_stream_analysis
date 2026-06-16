@@ -4,8 +4,7 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 import os
 import sys
-
-import versioningit
+from importlib.metadata import PackageNotFoundError, version as get_version
 
 sys.path.insert(0, os.path.abspath("../src"))
 
@@ -17,11 +16,12 @@ copyright = "Copyright 2024"  # noqa A001
 author = "Author Name"
 
 # The short X.Y version
-# NOTE: need to specify the location of the pyproject.toml file instead of the
-#       location of the source tree
-version = versioningit.get_version("..")
+try:
+    version = get_version("live_stream_analysis")
+except PackageNotFoundError:
+    version = "0.2.0"
 # The full version, including alpha/beta/rc tags
-release = ".".join(version.split(".")[:-1])
+release = version
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
