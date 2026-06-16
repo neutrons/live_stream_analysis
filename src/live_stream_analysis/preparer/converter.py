@@ -47,7 +47,11 @@ def convert_to_iq(
     return q_centers, iq
 
 
-def write_pixel_geometry_csv(rows: list[tuple[int, float, float, float, float]], output_csv: Path) -> None:
+def write_pixel_geometry_csv(
+    rows: list[tuple[int, float, float, float, float]],
+    output_csv: Path,
+    q_matrix_scale: float = 1.0,
+) -> None:
     output_csv = output_csv.resolve()
     output_csv.parent.mkdir(parents=True, exist_ok=True)
 
@@ -55,7 +59,7 @@ def write_pixel_geometry_csv(rows: list[tuple[int, float, float, float, float]],
         writer = csv.writer(handle)
         writer.writerow(["pixel id", "L2 value", "theta value", "TOF-to-Q matrix element"])
         for det_id, l2, theta_deg, _, q_matrix_element in rows:
-            writer.writerow([det_id, f"{l2:.8f}", f"{theta_deg:.8f}", f"{q_matrix_element:.8f}"])
+            writer.writerow([det_id, f"{l2:.8f}", f"{theta_deg:.8f}", f"{q_matrix_element * q_matrix_scale:.8f}"])
 
 
 def write_iq_csv(q_centers: list[float], iq: list[float], output_csv: Path) -> None:
@@ -93,6 +97,7 @@ def run_preparer(
     x_max: float,
     bin_width: float,
     q_bins: int,
+    q_matrix_scale: float = 1.0,
     plot: bool = False,
 ) -> tuple[int, int]:
     """Run the end-to-end pure-Python pre-processing workflow."""
@@ -101,7 +106,7 @@ def run_preparer(
         raise FileNotFoundError(f"IDF file does not exist: {idf_path}")
 
     geometry_rows = build_detector_geometry(idf_path)
-    write_pixel_geometry_csv(geometry_rows, pixel_geometry_csv)
+    write_pixel_geometry_csv(geometry_rows, pixel_geometry_csv, q_matrix_scale=q_matrix_scale)
 
     tof_centers, y_counts = build_synthetic_tof_spectrum(x_min, x_max, bin_width)
     q_centers, iq = convert_to_iq(geometry_rows, tof_centers, y_counts, q_bins)
@@ -136,6 +141,15 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
     parser.add_argument("--x-max", type=float, default=20000.0, help="TOF maximum in microseconds.")
     parser.add_argument("--bin-width", type=float, default=50.0, help="TOF bin width in microseconds.")
     parser.add_argument("--q-bins", type=int, default=400, help="Number of bins for output I(Q) histogram.")
+    parser.add_argument(
+        "--q-matrix-scale",
+        type=float,
+        default=1.0,
+        help=(
+            "Scale factor applied to TOF-to-Q matrix elements in pixel geometry CSV. "
+            "Use 10.0 for ADARA TOF ticks that represent 0.1 microseconds."
+        ),
+    )
     parser.add_argument("--plot", action="store_true", help="Plot I(Q) with matplotlib.")
     parser.set_defaults(_cmd="preparer")
     return parser
@@ -151,10 +165,12 @@ def run_from_namespace(args: argparse.Namespace) -> int:
         x_max=args.x_max,
         bin_width=args.bin_width,
         q_bins=args.q_bins,
+        q_matrix_scale=args.q_matrix_scale,
         plot=args.plot,
     )
     print(f"Loaded IDF: {args.idf_file.resolve()}")
     print(f"Detector pixels: {n_pixels}")
     print(f"Pixel geometry CSV: {args.pixel_geometry_csv.resolve()}")
     print(f"I(Q) CSV: {args.iq_csv.resolve()} ({n_q_bins} bins)")
+    print(f"Q-matrix scale applied: {args.q_matrix_scale}")
     return 0

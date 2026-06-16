@@ -92,3 +92,119 @@ class TestAdaraFileCLI:
         out = capsys.readouterr().out
         assert "Total events" in out
         assert "5" in out
+
+    def test_histogram_mode_writes_expected_bin(self, tmp_path: Path, capsys):
+        path = _write_adara(tmp_path, event_packet([(1, 1), (1, 1)]))
+        pixel_csv = tmp_path / "pixel_geometry.csv"
+        pixel_csv.write_text(
+            "\n".join(
+                [
+                    "pixel id,L2 value,theta value,TOF-to-Q matrix element",
+                    "0,1.0,1.0,0.0",
+                    "1,1.0,1.0,99.0",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        histogram_txt = tmp_path / "histogram.txt"
+
+        rc = main(
+            [
+                "analyze",
+                "--adara-file",
+                str(path),
+                "--histogram-pixel-geometry-csv",
+                str(pixel_csv),
+                "--histogram-q-max",
+                "100",
+                "--histogram-q-bin-size",
+                "0.02",
+                "--histogram-output-txt",
+                str(histogram_txt),
+            ]
+        )
+
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Histogrammed events" in out
+        assert "2" in out
+        assert histogram_txt.exists()
+        histogram_lines = histogram_txt.read_text(encoding="utf-8")
+        assert "Index:4950 - Counts:2" in histogram_lines
+
+    def test_histogram_mode_supports_unscaled_constants_with_tof_tick(self, tmp_path: Path, capsys):
+        path = _write_adara(tmp_path, event_packet([(1, 1)]))
+        pixel_csv = tmp_path / "pixel_geometry.csv"
+        pixel_csv.write_text(
+            "\n".join(
+                [
+                    "pixel id,L2 value,theta value,TOF-to-Q matrix element",
+                    "0,1.0,1.0,0.0",
+                    "1,1.0,1.0,9.9",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        histogram_txt = tmp_path / "histogram_tick.txt"
+
+        rc = main(
+            [
+                "analyze",
+                "--adara-file",
+                str(path),
+                "--histogram-pixel-geometry-csv",
+                str(pixel_csv),
+                "--histogram-q-max",
+                "100",
+                "--histogram-q-bin-size",
+                "0.02",
+                "--tof-tick-us",
+                "0.1",
+                "--histogram-output-txt",
+                str(histogram_txt),
+            ]
+        )
+
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "TOF tick size (us)" in out
+        assert "0.1" in out
+        histogram_lines = histogram_txt.read_text(encoding="utf-8")
+        assert "Index:4950 - Counts:1" in histogram_lines
+
+    def test_histogram_default_q_bin_size_and_q_max(self, tmp_path: Path, capsys):
+        path = _write_adara(tmp_path, event_packet([(1, 1)]))
+        pixel_csv = tmp_path / "pixel_geometry.csv"
+        pixel_csv.write_text(
+            "\n".join(
+                [
+                    "pixel id,L2 value,theta value,TOF-to-Q matrix element",
+                    "0,1.0,1.0,0.0",
+                    "1,1.0,1.0,29.98",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        histogram_txt = tmp_path / "histogram_defaults.txt"
+
+        rc = main(
+            [
+                "analyze",
+                "--adara-file",
+                str(path),
+                "--histogram-pixel-geometry-csv",
+                str(pixel_csv),
+                "--histogram-output-txt",
+                str(histogram_txt),
+            ]
+        )
+
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Histogram bins" in out
+        assert "1500" in out
+        histogram_lines = histogram_txt.read_text(encoding="utf-8")
+        assert "Index:1499 - Counts:1" in histogram_lines

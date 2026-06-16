@@ -19,6 +19,31 @@ pixi run live_stream_analysis preparer \
     --iq-csv iq.csv
 ```
 
+For ADARA histogram workflows where TOF ticks are 0.1 microseconds, pre-scale the
+TOF-to-Q matrix element by 10 during CSV generation:
+
+```bash
+pixi run live_stream_analysis preparer \
+    --idf-file tests/data/idf/NOMAD_Definition.xml \
+    --pixel-geometry-csv pixel_geometry.csv \
+    --iq-csv iq.csv \
+    --q-matrix-scale 10
+```
+
+Then run histogram analysis from an ADARA file (or use `--adara-stream HOST PORT`):
+
+```bash
+pixi run live_stream_analysis analyze \
+    --adara-file /path/to/file.adara \
+    --histogram-pixel-geometry-csv pixel_geometry.csv \
+    --histogram-q-bin-size 0.02 \
+    --histogram-q-max 100 \
+    --tof-tick-us 1.0 \
+    --histogram-output-txt bram_values_python_all.txt
+```
+
+If you use an unscaled pixel geometry CSV, set `--tof-tick-us 0.1` instead.
+
 Note: current parser coverage is validated for NOMAD IDF fixtures. A POWGEN fixture is included in tests for parser study/regression coverage.
 
 # Accessing Adara streams for NOMAD Fe2O3 (Linux)

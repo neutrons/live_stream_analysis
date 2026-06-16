@@ -55,3 +55,34 @@ def test_pixel_geometry_targets_match_all_idf_inputs(tmp_path: Path) -> None:
         write_pixel_geometry_csv(rows, generated_path)
 
         assert generated_path.read_text(encoding="utf-8") == target_path.read_text(encoding="utf-8")
+
+
+def test_preparer_q_matrix_scale_option(tmp_path: Path) -> None:
+    fixture_dir = Path(__file__).parents[1] / "data" / "idf"
+    idf_path = fixture_dir / "NOMAD_Definition.xml"
+    pixel_csv = tmp_path / "pixel_geometry_scaled.csv"
+    iq_csv = tmp_path / "iq_scaled.csv"
+
+    rc = main(
+        [
+            "preparer",
+            "--idf-file",
+            str(idf_path),
+            "--pixel-geometry-csv",
+            str(pixel_csv),
+            "--iq-csv",
+            str(iq_csv),
+            "--q-matrix-scale",
+            "10",
+        ]
+    )
+
+    assert rc == 0
+    lines = pixel_csv.read_text(encoding="utf-8").strip().splitlines()
+    first_data = lines[1].split(",")
+    scaled_q_matrix = float(first_data[3])
+
+    rows = build_detector_geometry(idf_path)
+    raw_first_q_matrix = rows[0][4]
+
+    assert scaled_q_matrix == float(f"{raw_first_q_matrix * 10.0:.8f}")
