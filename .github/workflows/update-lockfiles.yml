@@ -15,40 +15,42 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-        # Checks out the ref that triggered the workflow (or default branch).
 
-      - name: Setup pixi
-        uses: prefix-dev/setup-pixi@v0.9.6
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
 
       - name: Update lockfiles
         run: |
           set -euo pipefail
-          pixi update
+          uv lock --upgrade
 
       - name: Build PR body
         run: |
           {
             echo "## Lockfile update"
             echo
-            echo "This PR updates \\`pixi.lock\\` using \\`pixi update\\`."
+            echo "This PR updates uv.lock using uv lock --upgrade."
             echo
             echo "### Diff"
             echo
-            echo "\\`\\`\\`diff"
-            git --no-pager diff -- pixi.lock
-            echo "\\`\\`\\`"
+            echo '```diff'
+            git --no-pager diff -- uv.lock
+            echo '```'
           } > diff.md
 
       - name: Create pull request
         uses: peter-evans/create-pull-request@v8
-        # PR targets the branch checked out in this workflow.
         with:
-          # Prefer a PAT in PIXI_PR_TOKEN when GITHUB_TOKEN cannot create PRs.
-          token: ${{ secrets.PIXI_PR_TOKEN != '' && secrets.PIXI_PR_TOKEN || secrets.GITHUB_TOKEN }}
-          commit-message: Update pixi lockfile
-          title: Update pixi lockfile
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: Update uv lockfile
+          title: Update uv lockfile
           body-path: diff.md
-          branch: update-pixi
-          labels: pixi
+          branch: update-uv
+          labels: uv
           delete-branch: true
-          add-paths: pixi.lock
+          add-paths: uv.lock
