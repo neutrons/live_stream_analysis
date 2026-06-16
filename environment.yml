@@ -5,7 +5,6 @@ dependencies:
   # -- Runtime dependencies
   # base: list all base dependencies here
   - python>=3.9  # please specify the minimum version of python here
-  - versioningit
   # compute: list all compute dependencies here
   - numpy
   - pandas

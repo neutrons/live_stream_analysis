@@ -1,4 +1,7 @@
+from importlib.metadata import PackageNotFoundError, version
+
 try:
-    from ._version import __version__  # noqa: F401
-except ImportError:
-    __version__ = "unknown"
+    __version__ = version("live_stream_analysis")
+except PackageNotFoundError:
+    # Fallback for source-tree execution without an installed distribution.
+    __version__ = "0.2.0"

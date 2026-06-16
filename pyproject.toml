@@ -1,7 +1,7 @@
 [project]
 name = "live_stream_analysis"
 description = "Python repo for live stream analysis neutrons"
-dynamic = ["version"]
+version = "0.2.0"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 keywords = ["neutrons", "python"]
@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-docs = ["sphinx", "sphinx_rtd_theme", "versioningit", "myst-parser"]
+docs = ["sphinx", "sphinx_rtd_theme", "myst-parser"]
 
 [project.scripts]
 live-stream-analysis-cli = "live_stream_analysis.main:main"
@@ -27,18 +27,10 @@ issues = "https://github.com/neutrons/live_stream_analysis/issues"
 
 [build-system]
 build-backend = "hatchling.build"
-requires = ["hatchling", "versioningit"]
-
-[tool.hatch.version]
-source = "versioningit"
-
-[tool.hatch.build.hooks.versioningit-onbuild]
-source-file = "src/live_stream_analysis/_version.py"
-build-file = "live_stream_analysis/_version.py"
+requires = ["hatchling"]
 
 [tool.hatch.build]
 artifacts = [
-  "src/live_stream_analysis/_version.py",
   "src/live_stream_analysis/**/*.yml",
   "src/live_stream_analysis/**/*.yaml",
   "src/live_stream_analysis/**/*.ini",
@@ -47,20 +39,15 @@ artifacts = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/live_stream_analysis"]
 
-[tool.versioningit.vcs]
-method = "git"
-default-tag = "0.1.0"
+[dependency-groups]
+test = ["pytest", "pytest-cov", "pytest-repeat", "pytest-xdist"]
+dev = ["pip-audit", "pre-commit", "ruff"]
+docs = ["myst-parser", "sphinx", "sphinx_rtd_theme"]
+package = ["build", "twine"]
+jupyter = ["ipympl", "ipywidgets", "jupyterlab"]
 
-[tool.versioningit.next-version]
-method = "minor"
-
-[tool.versioningit.format]
-distance = "{next_version}.dev{committer_date:%Y%m%d%H%M%S}"
-dirty = "{version}"
-distance-dirty = "{next_version}.dev{committer_date:%Y%m%d%H%M%S}"
-
-[tool.versioningit.write]
-file = "src/live_stream_analysis/_version.py"
+[tool.uv]
+default-groups = ["dev", "test"]
 
 [tool.pytest.ini_options]
 addopts = "-v --cov=live_stream_analysis --cov-report=term-missing"
@@ -98,125 +85,3 @@ known-first-party = ["live_stream_analysis"]
 quote-style = "double"
 indent-style = "space"
 line-ending = "auto"
-
-# ------------------ #
-# Pixi configuration #
-# ------------------ #
-[tool.pixi.workspace]
-preview = ["pixi-build"]
-channels = ["conda-forge", "https://prefix.dev/pixi-build-backends"]
-platforms = ["linux-64", "osx-arm64"]                                # add additional platforms as needed
-
-[tool.pixi.pypi-dependencies]
-live_stream_analysis = { path = ".", editable = true }
-
-# The dependencies listed below will be prioritized over the ones
-# listed in the [project] section.
-[tool.pixi.dependencies]
-# This will overwrite the dependencies listed in the [project] section
-numpy = "*"
-scipy = "*" # specify derivative dependencies here if you need them from conda
-
-[tool.pixi.package.host-dependencies]
-hatchling = "*"
-versioningit = "*"
-
-[tool.pixi.package.run-dependencies]
-python = ">=3.10"
-numpy = "*"
-
-[tool.pixi.package]
-name = "live_stream_analysis"
-version = "0.0.0"
-
-[tool.pixi.package.build]
-backend = { name = "pixi-build-python", version = "*" }
-
-[tool.pixi.tasks]
-# Documentation
-build-docs = { cmd = "sphinx-build -b html docs docs/_build", description = "Build documentation" }
-test-docs = { cmd = "sphinx-build -M doctest docs docs/_build", description = "Test building the documentation" }
-# Testing
-test = { cmd = "pytest", description = "Run the test suite" }
-# Preparer fixtures
-generate-target-pixel-geometry = { cmd = "python scripts/generate_target_pixel_geometry.py", description = "Generate target pixel geometry CSV fixtures from tests/data/idf" }
-# Packaging
-pypi-sdist = { cmd = "hatch build -t sdist", description = "Build the source distribution (tar.gz)" }
-pypi-wheel = { cmd = "hatch build -t wheel", description = "Build the wheel distribution" }
-pypi-build = { description = "Build the packages for PyPI", depends-on = [
-  "pypi-sdist",
-  "pypi-wheel",
-] }
-pypi-publish = { cmd = "twine upload dist/*", description = "Publish the package to PyPI", depends-on = [
-  "pypi-build",
-] }
-pypi-publish-test = { cmd = "twine upload --repository testpypi dist/*", description = "Publish the package to TestPyPI", depends-on = [
-  "pypi-build",
-] }
-conda-build-command = { cmd = "pixi build", description = "Build the conda package command" }
-conda-build = { description = "Build the conda package", depends-on = [
-  "backup-toml",
-  "sync-version",
-  "conda-build-command",
-  "reset-toml",
-] }
-conda-publish = { cmd = "anaconda upload *.conda", description = "Publish the .conda package to anaconda.org", depends-on = [
-  "conda-build",
-] }
-# Misc
-audit-deps = { cmd = "pip-audit --local -s osv --ignore-vuln CVE-2026-3219", description = "Audit the package dependencies for vulnerabilities" }
-# Cleaning
-clean = { cmd = "rm -rf .pytest_cache .ruff_cache **/*.egg-info **/dist **/__pycache__", description = "Clean up various caches and build artifacts" }
-clean-conda = { cmd = "rm -f *.conda", description = "Clean the local .conda build artifacts" }
-clean-docs = { cmd = "rm -rf docs/_build", description = "Clean up documentation build artifacts" }
-clean-pypi = { cmd = "rm -rf dist", description = "Clean the PyPI build artifacts" }
-clean-all = { description = "Clean all artifacts", depends-on = [
-  "clean",
-  "clean-conda",
-  "clean-docs",
-  "clean-pypi",
-] }
-# workaround for dynamic versioning
-sync-version = { cmd = 'version=$(python -m versioningit); toml set tool.pixi.package.version "$version" --toml-path pyproject.toml', description = "Sync pyproject.toml version with Git version" }
-backup-toml = { cmd = "cp pyproject.toml pyproject.toml.bak", description = "Backup the pyproject.toml file" }
-reset-toml = { cmd = "cp pyproject.toml.bak pyproject.toml; rm pyproject.toml.bak", description = "Reset the pyproject.toml file to the original state" }
-
-[tool.pixi.feature.test.dependencies]
-pytest = "*"
-pytest-cov = "*"
-pytest-xdist = "*"
-pytest-repeat = "*"
-
-[tool.pixi.feature.package.dependencies]
-anaconda-client = ">=1.13.0,<2"
-hatch = "*"
-twine = ">=6.1.0,<7"
-versioningit = "*"
-
-[tool.pixi.feature.package.pypi-dependencies]
-toml-cli = "*"
-
-[tool.pixi.feature.developer.dependencies]
-pip = ">=26.0"
-pip-audit = "*"
-versioningit = "*"
-pre-commit = "*"
-ruff = "*"
-
-[tool.pixi.feature.docs.dependencies]
-sphinx = ">=8.2.1,<9"
-sphinx_rtd_theme = ">=3.0.1,<4"
-
-[tool.pixi.feature.jupyter.dependencies]
-jupyterlab = "*"
-ipympl = "*"
-ipywidgets = "*"
-
-[tool.pixi.environments]
-default = { features = [
-  "test",
-  "package",
-  "docs",
-  "developer",
-], solve-group = "default" }
-jupyter = { features = ["developer", "jupyter"], solve-group = "jupyter" }
