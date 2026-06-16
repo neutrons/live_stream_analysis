@@ -84,15 +84,40 @@ jobs:
       - name: Build conda package
         run: |
           pixi run conda-build
-          mkdir -p /tmp/local-channel/linux-64
-          cp *.conda /tmp/local-channel/linux-64
 
       - name: Verify conda package
-        uses: neutrons/conda-actions/pkg-verify@main
-        with:
-          package-name: ${{ env.PKG_NAME }}
-          module-name: ${{ env.MODULE_NAME }}
-          local-channel: /tmp/local-channel
+        run: |
+          package_file=$(ls -1t ${{ env.PKG_NAME }}-*.conda | head -n 1)
+          if [[ -z "${package_file}" ]]; then
+            echo "Failed to find built conda package for ${{ env.PKG_NAME }}"
+            exit 1
+          fi
+
+          conda_version=$(
+            basename "${package_file}" |
+              sed -E 's/^${{ env.PKG_NAME }}-([^-]+)-.*\.conda$/\1/'
+          )
+          python_version=$(
+            pixi run python -c \
+              "import ${{ env.MODULE_NAME }}; print(${{ env.MODULE_NAME }}.__version__)" |
+              tail -n 1
+          )
+
+          if [[ -z "${conda_version}" || -z "${python_version}" ]]; then
+            echo "Failed to determine package versions"
+            exit 1
+          fi
+
+          echo "------------------------"
+          echo "Conda artifact version: ${conda_version}"
+          echo "Python module version: ${python_version}"
+
+          if [[ "${conda_version}" != "${python_version}" ]]; then
+            echo "Version mismatch"
+            exit 1
+          fi
+
+          echo "Versions match."
 
       - name: Upload conda package as artifact
         uses: actions/upload-artifact@v7
