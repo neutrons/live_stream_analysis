@@ -5,14 +5,18 @@ from __future__ import annotations
 import argparse
 import math
 
+try:
+    from readadara import AdaraFileReader, AdaraLiveStreamReader
+except ImportError:  # pragma: no cover
+    AdaraFileReader = None
+    AdaraLiveStreamReader = None
+
 from .histogram import PixelQConversion, pixel_tof_to_q
 from .live_plot import HistogramPlotter, maybe_update_live_plot
 
 
 def build_reader(args: argparse.Namespace):
     """Construct the appropriate ADARA reader from parsed arguments."""
-    from readadara import AdaraFileReader, AdaraLiveStreamReader
-
     has_file = args.adara_file is not None
     has_nexus = args.nexus_file is not None
     has_stream = args.adara_stream is not None
@@ -21,12 +25,16 @@ def build_reader(args: argparse.Namespace):
         raise ValueError("Provide exactly one of --adara-file, --nexus-file, or --adara-stream.")
 
     if has_file:
+        if AdaraFileReader is None:
+            raise ImportError("readadara is required to read ADARA files")
         return AdaraFileReader(filename=args.adara_file)
 
     if has_nexus:
         return args.nexus_file
 
     if has_stream:
+        if AdaraLiveStreamReader is None:
+            raise ImportError("readadara is required to read ADARA live streams")
         hostname, port_str = args.adara_stream
         try:
             port = int(port_str)

@@ -57,6 +57,7 @@ def test_accumulate_nexus_histogram_counts_events_into_expected_bin(tmp_path: Pa
         nexus_files=[str(nexus_path)],
         q_conversion=q_conversion,
         histogram_bins=600,
+        histogram_q_min=0.0,
         histogram_q_bin_size=0.02,
         tof_tick_us=1.0,
         plotter=NullHistogramPlotter(),

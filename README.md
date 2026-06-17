@@ -43,7 +43,7 @@ Example with one of the provided calibration files:
 ```bash
 uv run live_stream_analysis preparer \
     --idf-file tests/data/idf/NOMAD_Definition.xml \
-    --calibration-file nexus_files/calibration/NOMAD_241348_2026-05-13_shifter.h5 \
+    --calibration-file tests/data/calibration/NOMAD_243451_2026-06-09_shifter.h5 \
     --pixel-geometry-csv pixel_geometry_calibrated.csv \
     --iq-csv iq.csv
 ```
@@ -54,6 +54,7 @@ Then use the calibrated geometry directly in analyzer:
 uv run live_stream_analysis analyze \
     --adara-file /path/to/file.adara \
     --histogram-pixel-geometry-csv pixel_geometry_calibrated.csv \
+    --histogram-q-min 0.6 \
     --histogram-q-bin-size 0.02 \
     --histogram-q-max 100 \
     --tof-tick-us 1.0 \
@@ -77,6 +78,7 @@ Then run histogram analysis from an ADARA file (or use `--adara-stream HOST PORT
 uv run live_stream_analysis analyze \
     --adara-file /path/to/file.adara \
     --histogram-pixel-geometry-csv pixel_geometry.csv \
+    --histogram-q-min 0.6 \
     --histogram-q-bin-size 0.02 \
     --histogram-q-max 100 \
     --tof-tick-us 1.0 \
@@ -92,6 +94,7 @@ uv run live_stream_analysis analyze \
     --nexus-file nexus_files/diamond/NOM_243708.nxs.h5 \
     --nexus-file nexus_files/diamond/NOM_243709.nxs.h5 \
     --histogram-pixel-geometry-csv pixel_geometry.csv \
+    --histogram-q-min 0.6 \
     --histogram-q-bin-size 0.02 \
     --histogram-q-max 30 \
     --tof-tick-us 1.0 \
@@ -110,6 +113,7 @@ docker run --rm -v "$PWD":/work -w /work live-stream-analysis \
     live_stream_analysis analyze \
     --adara-file adara_mount/20250201/adara_streams/NOMAD.Raw.Data.Runs.208511-208543/20250131-101613.350178410-run-208511/m00000001-f00000001-run-208511.adara \
     --histogram-pixel-geometry-csv pixel_geometry.csv \
+    --histogram-q-min 0.6 \
     --histogram-q-bin-size 0.02 \
     --histogram-q-max 30 \
     --tof-tick-us 1.0 \

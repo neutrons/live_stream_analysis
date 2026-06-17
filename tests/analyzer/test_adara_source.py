@@ -64,6 +64,7 @@ def test_accumulate_adara_histogram_uses_pixel_id_then_tof_tuple_order():
         reader=reader,
         q_conversion=q_conversion,
         histogram_bins=600,
+        histogram_q_min=0.0,
         histogram_q_bin_size=0.02,
         tof_tick_us=1.0,
         plotter=NullHistogramPlotter(),

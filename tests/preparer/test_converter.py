@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from live_stream_analysis.main import main
+from live_stream_analysis.preparer.calibration import load_diffraction_calibration
 from live_stream_analysis.preparer.converter import write_pixel_geometry_csv
 from live_stream_analysis.preparer.instrument import build_detector_geometry
 
@@ -46,29 +47,6 @@ def _write_nexus(tmp_path: Path, name: str, event_ids: list[int], event_tofs: li
         events = entry.create_group("bank1_events")
         events.create_dataset("event_id", data=np.array(event_ids, dtype=np.int32))
         events.create_dataset("event_time_offset", data=np.array(event_tofs, dtype=np.float64))
-    return path
-
-
-def _write_diffcal(
-    tmp_path: Path,
-    name: str,
-    detids: list[int],
-    difc: list[float],
-    difa: list[float],
-    tzero: list[float],
-    use: list[int],
-) -> Path:
-    path = tmp_path / name
-    with h5py.File(path, "w") as handle:
-        calibration = handle.create_group("calibration")
-        calibration.create_dataset("detid", data=np.array(detids, dtype=np.int32))
-        calibration.create_dataset("difc", data=np.array(difc, dtype=np.float64))
-        calibration.create_dataset("difa", data=np.array(difa, dtype=np.float64))
-        calibration.create_dataset("tzero", data=np.array(tzero, dtype=np.float64))
-        calibration.create_dataset("use", data=np.array(use, dtype=np.int32))
-        instrument = calibration.create_group("instrument")
-        instrument.create_dataset("name", data=np.array([b"NOMAD"]))
-        instrument.create_dataset("instrument_source", data=np.array([b"NOMAD_Definition.xml"]))
     return path
 
 
@@ -158,18 +136,12 @@ def test_preparer_q_matrix_scale_option(tmp_path: Path) -> None:
 def test_preparer_calibration_file_adds_diffcal_and_use_columns(tmp_path: Path) -> None:
     fixture_dir = Path(__file__).parents[1] / "data" / "idf"
     idf_path = fixture_dir / "NOMAD_Definition.xml"
+    calibration_file = Path(__file__).parents[1] / "data" / "calibration" / "NOMAD_243451_2026-06-09_shifter.h5"
+    calibration_by_detector = load_diffraction_calibration(calibration_file)
     rows = build_detector_geometry(idf_path)
-    first_detector = rows[0][0]
-
-    calibration_file = _write_diffcal(
-        tmp_path,
-        "calibration.h5",
-        detids=[first_detector],
-        difc=[2000.0],
-        difa=[0.2],
-        tzero=[10.0],
-        use=[0],
-    )
+    matching_row = next(row for row in rows if row[0] in calibration_by_detector)
+    detector_id = matching_row[0]
+    detector_calibration = calibration_by_detector[detector_id]
 
     pixel_csv = tmp_path / "pixel_geometry_calibrated.csv"
     iq_csv = tmp_path / "iq_calibrated.csv"
@@ -192,13 +164,20 @@ def test_preparer_calibration_file_adds_diffcal_and_use_columns(tmp_path: Path) 
     lines = pixel_csv.read_text(encoding="utf-8").strip().splitlines()
     assert lines[0] == "pixel id,L2 value,theta value,TOF-to-Q matrix element,difc,difa,tzero,use"
 
-    first_data = lines[1].split(",")
-    assert int(first_data[0]) == first_detector
-    assert float(first_data[3]) == pytest.approx(2.0 * np.pi * 2000.0)
-    assert float(first_data[4]) == pytest.approx(2000.0)
-    assert float(first_data[5]) == pytest.approx(0.2)
-    assert float(first_data[6]) == pytest.approx(10.0)
-    assert int(first_data[7]) == 0
+    data_by_detector = {int(line.split(",")[0]): line.split(",") for line in lines[1:]}
+    assert detector_id in data_by_detector
+
+    detector_data = data_by_detector[detector_id]
+    assert float(detector_data[3]) == pytest.approx(2.0 * np.pi * detector_calibration.difc)
+    assert float(detector_data[4]) == pytest.approx(detector_calibration.difc)
+    assert float(detector_data[5]) == pytest.approx(detector_calibration.difa)
+    assert float(detector_data[6]) == pytest.approx(detector_calibration.tzero)
+    assert int(detector_data[7]) == detector_calibration.use
+
+    masked_detector = next(
+        detector for detector, calibration in calibration_by_detector.items() if calibration.use == 0 and detector in data_by_detector
+    )
+    assert int(data_by_detector[masked_detector][7]) == 0
 
 
 def test_preparer_background_reduction_mode_writes_three_column_csv(tmp_path: Path) -> None:

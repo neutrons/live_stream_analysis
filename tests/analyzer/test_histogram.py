@@ -37,6 +37,7 @@ def test_load_q_matrix_constants_maps_pixel_ids(tmp_path: Path):
 
 def test_validate_histogram_args_rejects_non_multiple_q_range():
     args = argparse.Namespace(
+        histogram_q_min=0.0,
         histogram_q_bin_size=0.03,
         histogram_q_max=1.0,
         tof_tick_us=1.0,
@@ -114,6 +115,7 @@ def test_apply_corrections_propagates_background_and_normalization(tmp_path: Pat
     args = argparse.Namespace(
         background_subtraction=str(background_csv),
         normalization=str(normalization_csv),
+        histogram_q_min=0.0,
         histogram_q_bin_size=0.02,
         histogram_q_max=0.02,
     )

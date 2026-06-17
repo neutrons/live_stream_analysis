@@ -5,6 +5,8 @@ import csv
 import math
 from pathlib import Path
 
+import matplotlib.pyplot as plt
+
 from .calibration import DetectorCalibration, load_diffraction_calibration
 from .instrument import (
     build_detector_geometry,
@@ -123,11 +125,6 @@ def write_iq_csv(q_centers: list[float], iq: list[float], output_csv: Path) -> N
 
 
 def plot_iq(q_centers: list[float], iq: list[float]) -> None:
-    try:
-        import matplotlib.pyplot as plt
-    except Exception as exc:  # pragma: no cover
-        raise RuntimeError("Plotting requested but matplotlib is not available") from exc
-
     plt.figure(figsize=(8, 5))
     plt.plot(q_centers, iq, lw=1.5)
     plt.xlabel("Q (1/Angstrom)")
