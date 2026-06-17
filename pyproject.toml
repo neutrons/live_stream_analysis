@@ -74,7 +74,12 @@ markers = ["mymarker: example markers goes here"]
 [tool.ruff]
 target-version = "py311"
 line-length = 120
-exclude = ["notebooks/**", "**/*.ipynb"]
+exclude = [
+  "notebooks/**",
+  "**/*.ipynb",
+  "repos/**",
+  "scripts/ehsan_python_histogram.py",
+]
 
 [tool.ruff.lint]
 select = ["A", "ARG", "ASYNC", "BLE", "C90", "E", "F", "I", "N", "UP032", "W"]

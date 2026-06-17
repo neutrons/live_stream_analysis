@@ -29,22 +29,21 @@ uv run live_stream_analysis preparer --help
 uv run live_stream_analysis analyze --help
 ```
 
-## Plotting BRAM histogram output
+## Plotting histogram CSV output
 
-The analyzer can write histogram text files in this format:
+The analyzer writes three-column CSV files with this schema:
 
 ```text
-Index:0 - Counts:21381
-Index:1 - Counts:59916
+Q value,I(Q),Error I(Q)
+0.01000000,21381.00000000,146.22243300
 ```
 
 To plot that output, install the optional plotting dependencies and run:
 
 ```bash
 uv sync --group jupyter
-uv run --group jupyter python scripts/plot_bram_histogram.py bram_values_python_all.txt --output-png bram_values_python_all.png --max-bin 500 --q-bin-size 0.02
+uv run --group jupyter python scripts/plot_csv_histogram.py analyze_histogram.csv
 ```
 
-The script plots Q on the x-axis by default. Use `--x-axis bin` for raw bin
-indices, `--style bar` for a bar chart, or omit `--max-bin` to plot the full
-file.
+Use `--show-relative-uncertainty`, `--x-max`, and repeated `--input` arguments
+to compare corrected sample, background, and normalization outputs in one view.

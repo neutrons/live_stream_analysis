@@ -42,6 +42,23 @@ uv run live_stream_analysis analyze \
     --histogram-output-csv sample_histogram.csv
 ```
 
+The same `analyze` command also accepts event NeXus sample inputs. Repeat
+`--nexus-file` to combine multiple sample runs while keeping the same histogram,
+background-subtraction, normalization, and CSV output path:
+
+```bash
+uv run live_stream_analysis analyze \
+    --nexus-file nexus_files/diamond/NOM_243708.nxs.h5 \
+    --nexus-file nexus_files/diamond/NOM_243709.nxs.h5 \
+    --histogram-pixel-geometry-csv pixel_geometry.csv \
+    --histogram-q-bin-size 0.02 \
+    --histogram-q-max 30 \
+    --tof-tick-us 1.0 \
+    --background-subtraction background.csv \
+    --normalization normalization.csv \
+    --histogram-output-csv analyze_histogram.csv
+```
+
 To run the same analysis inside Docker, mount the directory that contains your
 ADARA file, pixel geometry CSV, and desired output path into the container.
 From the repository root, this works with the current image:
@@ -75,6 +92,24 @@ If you also want to save the current view to disk, add `--output-png`:
 uv run --group jupyter python scripts/plot_csv_histogram.py sample_histogram.csv --output-png sample_histogram.png
 ```
 
+To inspect whether the propagated uncertainty looks reasonable, add a second panel
+showing relative uncertainty, `sigma / I(Q)`:
+
+```bash
+uv run --group jupyter python scripts/plot_csv_histogram.py corrected_histogram.csv --show-relative-uncertainty
+```
+
+If the corrected signal is close to zero in part of the range, the relative
+uncertainty can spike and dominate the panel. To focus on bins with a more
+stable denominator, mask points where `|I(Q)|` is too small:
+
+```bash
+uv run --group jupyter python scripts/plot_csv_histogram.py \
+    corrected_histogram.csv \
+    --show-relative-uncertainty \
+    --relative-uncertainty-min-abs-intensity 2.0
+```
+
 To compare sample, background, normalization, and corrected outputs on one figure,
 either overlay them:
 
@@ -106,8 +141,31 @@ uv run --group jupyter python scripts/plot_csv_histogram.py \
     --mode subplots
 ```
 
+For the low-Q diagnostic view, it is often useful to combine both ideas:
+overlay the curves, zoom into the low-Q region, and mask unstable relative
+uncertainty bins where the corrected intensity is nearly zero:
+
+```bash
+uv run --group jupyter python scripts/plot_csv_histogram.py \
+    --input sample_histogram.csv \
+    --input background.csv \
+    --input normalization.csv \
+    --input corrected_histogram.csv \
+    --label Sample \
+    --label Background \
+    --label Normalization \
+    --label Corrected \
+    --mode overlay \
+    --x-max 1.5 \
+    --show-relative-uncertainty \
+    --relative-uncertainty-min-abs-intensity 2.0 \
+    --error-alpha 0.12
+```
+
 The plotting script uses Q on the x-axis and includes shaded error bands by default.
-Use `--x-min`, `--x-max`, or `--hide-error-band` to simplify the view when needed.
+Use `--x-min`, `--x-max`, `--hide-error-band`, `--error-alpha`,
+`--show-relative-uncertainty`, or `--relative-uncertainty-min-abs-intensity`
+to simplify or diagnose the view when needed.
 
 If you use an unscaled pixel geometry CSV, set `--tof-tick-us 0.1` instead.
 

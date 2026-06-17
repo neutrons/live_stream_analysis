@@ -7,7 +7,6 @@ from pathlib import Path
 import matplotlib
 import matplotlib.pyplot as plt
 
-
 DEFAULT_COLORS = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:brown", "tab:pink"]
 
 
@@ -58,15 +57,131 @@ def _plot_series(
     error: list[float],
     label: str,
     color: str,
+    error_alpha: float,
 ) -> None:
     lower = [y_value - err_value for y_value, err_value in zip(intensity, error, strict=True)]
     upper = [y_value + err_value for y_value, err_value in zip(intensity, error, strict=True)]
     axis.plot(q_values, intensity, color=color, linewidth=1.5, label=label)
-    axis.fill_between(q_values, lower, upper, color=color, alpha=0.2)
+    axis.fill_between(q_values, lower, upper, color=color, alpha=error_alpha)
+
+
+def _relative_uncertainty(
+    intensity: list[float],
+    error: list[float],
+    min_abs_intensity: float,
+) -> list[float | float("nan")]:
+    relative: list[float | float("nan")] = []
+    for y_value, err_value in zip(intensity, error, strict=True):
+        if abs(y_value) < min_abs_intensity:
+            relative.append(float("nan"))
+            continue
+        relative.append(err_value / abs(y_value))
+    return relative
+
+
+def _plot_relative_uncertainty(
+    axis: plt.Axes,
+    q_values: list[float],
+    intensity: list[float],
+    error: list[float],
+    label: str,
+    color: str,
+    min_abs_intensity: float,
+) -> None:
+    axis.plot(
+        q_values,
+        _relative_uncertainty(intensity, error, min_abs_intensity),
+        color=color,
+        linewidth=1.2,
+        label=label,
+    )
 
 
 def _default_label(path: Path) -> str:
     return path.stem.replace("_", " ")
+
+
+def _render_subplot_mode(
+    args: argparse.Namespace,
+    series: list[tuple[str, list[float], list[float], list[float]]],
+) -> plt.Figure:
+    panel_count = 2 if args.show_relative_uncertainty else 1
+    figure, axes = plt.subplots(
+        len(series) * panel_count,
+        1,
+        figsize=(12, 3.5 * len(series) * panel_count),
+        sharex=True,
+    )
+    axes_list = list(axes.flat) if hasattr(axes, "flat") else [axes]
+    for index, (label, q_values, intensity, error) in enumerate(series):
+        color = DEFAULT_COLORS[index % len(DEFAULT_COLORS)]
+        intensity_axis = axes_list[index * panel_count]
+        _plot_series(intensity_axis, q_values, intensity, error, label, color, args.error_alpha)
+        if args.hide_error_band:
+            intensity_axis.collections.clear()
+        intensity_axis.set_ylabel("I(Q)")
+        intensity_axis.set_title(label)
+        intensity_axis.grid(True, alpha=0.3)
+        intensity_axis.legend(loc="best")
+
+        if args.show_relative_uncertainty:
+            relative_axis = axes_list[index * panel_count + 1]
+            _plot_relative_uncertainty(
+                relative_axis,
+                q_values,
+                intensity,
+                error,
+                label,
+                color,
+                args.relative_uncertainty_min_abs_intensity,
+            )
+            relative_axis.set_ylabel("sigma / I(Q)")
+            relative_axis.grid(True, alpha=0.3)
+            relative_axis.legend(loc="best")
+    axes_list[-1].set_xlabel("Q")
+    figure.suptitle(args.title)
+    figure.tight_layout()
+    return figure
+
+
+def _render_overlay_mode(
+    args: argparse.Namespace,
+    series: list[tuple[str, list[float], list[float], list[float]]],
+) -> plt.Figure:
+    if args.show_relative_uncertainty:
+        figure, axes = plt.subplots(2, 1, figsize=(12, 9), sharex=True)
+        intensity_axis, relative_axis = axes
+    else:
+        figure, intensity_axis = plt.subplots(figsize=(12, 6))
+        relative_axis = None
+    for index, (label, q_values, intensity, error) in enumerate(series):
+        color = args.line_color if len(series) == 1 and args.line_color else DEFAULT_COLORS[index % len(DEFAULT_COLORS)]
+        _plot_series(intensity_axis, q_values, intensity, error, label, color, args.error_alpha)
+        if args.hide_error_band:
+            intensity_axis.collections.clear()
+        if relative_axis is not None:
+            _plot_relative_uncertainty(
+                relative_axis,
+                q_values,
+                intensity,
+                error,
+                label,
+                color,
+                args.relative_uncertainty_min_abs_intensity,
+            )
+    intensity_axis.set_title(args.title)
+    intensity_axis.set_ylabel("I(Q)")
+    intensity_axis.grid(True, alpha=0.3)
+    if len(series) > 1:
+        intensity_axis.legend(loc="best")
+    if relative_axis is not None:
+        relative_axis.set_xlabel("Q")
+        relative_axis.set_ylabel("sigma / I(Q)")
+        relative_axis.grid(True, alpha=0.3)
+        if len(series) > 1:
+            relative_axis.legend(loc="best")
+    figure.tight_layout()
+    return figure
 
 
 def _show_figure() -> None:
@@ -78,7 +193,9 @@ def _show_figure() -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Plot one or more three-column histogram CSV files with shaded error bars.")
+    parser = argparse.ArgumentParser(
+        description="Plot one or more three-column histogram CSV files with shaded error bars."
+    )
     parser.add_argument(
         "input_csv",
         nargs="?",
@@ -136,6 +253,23 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Plot only the line without the shaded error band.",
     )
+    parser.add_argument(
+        "--error-alpha",
+        type=float,
+        default=0.2,
+        help="Alpha value for the shaded error band.",
+    )
+    parser.add_argument(
+        "--show-relative-uncertainty",
+        action="store_true",
+        help="Add a second panel showing relative uncertainty, sigma / I(Q).",
+    )
+    parser.add_argument(
+        "--relative-uncertainty-min-abs-intensity",
+        type=float,
+        default=0.0,
+        help="Mask relative-uncertainty points where |I(Q)| is below this threshold.",
+    )
     return parser
 
 
@@ -157,34 +291,9 @@ def main() -> None:
         series.append((label, q_values, intensity, error))
 
     if args.mode == "subplots" and len(series) > 1:
-        figure, axes = plt.subplots(len(series), 1, figsize=(12, 3.5 * len(series)), sharex=True)
-        axes_list = list(axes.flat) if hasattr(axes, "flat") else [axes]
-        for index, (axis, (label, q_values, intensity, error)) in enumerate(zip(axes_list, series, strict=True)):
-            color = DEFAULT_COLORS[index % len(DEFAULT_COLORS)]
-            _plot_series(axis, q_values, intensity, error, label, color)
-            if args.hide_error_band:
-                axis.collections.clear()
-            axis.set_ylabel("I(Q)")
-            axis.set_title(label)
-            axis.grid(True, alpha=0.3)
-            axis.legend(loc="best")
-        axes_list[-1].set_xlabel("Q")
-        figure.suptitle(args.title)
-        figure.tight_layout()
+        figure = _render_subplot_mode(args, series)
     else:
-        figure, axis = plt.subplots(figsize=(12, 6))
-        for index, (label, q_values, intensity, error) in enumerate(series):
-            color = args.line_color if len(series) == 1 and args.line_color else DEFAULT_COLORS[index % len(DEFAULT_COLORS)]
-            _plot_series(axis, q_values, intensity, error, label, color)
-            if args.hide_error_band:
-                axis.collections.clear()
-        axis.set_title(args.title)
-        axis.set_xlabel("Q")
-        axis.set_ylabel("I(Q)")
-        axis.grid(True, alpha=0.3)
-        if len(series) > 1:
-            axis.legend(loc="best")
-        figure.tight_layout()
+        figure = _render_overlay_mode(args, series)
 
     if args.output_png:
         output_path = Path(args.output_png)

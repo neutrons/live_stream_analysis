@@ -1,0 +1,94 @@
+from __future__ import annotations
+
+import argparse
+
+
+def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the 'analyze' subcommand and return its parser."""
+    parser = subparsers.add_parser(
+        "analyze",
+        help="Read and analyze ADARA packet streams.",
+        description=(
+            "Analyze an ADARA or NeXus data source.  "
+            "Exactly one of --adara-file, --nexus-file, or --adara-stream must be provided."
+        ),
+    )
+    parser.set_defaults(_cmd="analyze")
+
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument(
+        "--adara-file",
+        metavar="FILE",
+        help="Path to an ADARA binary file to analyze.",
+    )
+    source.add_argument(
+        "--nexus-file",
+        metavar="FILE",
+        action="append",
+        default=None,
+        help="Path to an event NeXus HDF5 file to analyze. Repeat to combine multiple files.",
+    )
+    source.add_argument(
+        "--adara-stream",
+        nargs=2,
+        metavar=("HOSTNAME", "PORT"),
+        help="Hostname and port of a live ADARA stream (e.g. bl10-daq1 31415).",
+    )
+
+    parser.add_argument(
+        "--histogram-pixel-geometry-csv",
+        metavar="FILE",
+        help=(
+            "Pixel geometry CSV from the preparer command. "
+            "When provided, compute FPGA-style Q-bin histogram while reading ADARA events."
+        ),
+    )
+    parser.add_argument(
+        "--histogram-q-bin-size",
+        type=float,
+        default=0.02,
+        help="Histogram bin width in Q units (default: 0.02).",
+    )
+    parser.add_argument(
+        "--histogram-q-max",
+        type=float,
+        default=30.0,
+        help="Expected Q upper bound used for bin scaling (default: 30.0).",
+    )
+    parser.add_argument(
+        "--tof-tick-us",
+        type=float,
+        default=1.0,
+        help=(
+            "TOF tick size in microseconds used by ADARA events. "
+            "Use 0.1 if CSV constants are unscaled; use 1.0 if CSV constants were pre-scaled by 10."
+        ),
+    )
+    parser.add_argument(
+        "--histogram-output-csv",
+        metavar="FILE",
+        help="Optional output CSV file with columns: Q value, I(Q), Error I(Q).",
+    )
+    parser.add_argument(
+        "--background-subtraction",
+        metavar="FILE",
+        help="Optional three-column CSV with Q value, I(Q), Error I(Q) to subtract from the histogrammed signal.",
+    )
+    parser.add_argument(
+        "--normalization",
+        metavar="FILE",
+        help="Optional three-column CSV with Q value, I(Q), Error I(Q) used to normalize the histogrammed signal.",
+    )
+    parser.add_argument(
+        "--live-plot",
+        action="store_true",
+        help="Show a live-updating Q vs I(Q) plot with shaded error bars while histogramming.",
+    )
+    parser.add_argument(
+        "--live-plot-refresh-every",
+        type=int,
+        default=1,
+        help="Refresh the live plot every N ADARA packets or NeXus chunks (default: 1).",
+    )
+
+    return parser

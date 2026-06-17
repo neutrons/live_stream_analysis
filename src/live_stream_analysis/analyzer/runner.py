@@ -1,0 +1,87 @@
+from __future__ import annotations
+
+import argparse
+from dataclasses import dataclass
+from typing import Protocol
+
+from .adara import accumulate_adara_histogram, build_reader
+from .adara import run_basic_mode as run_adara_basic_mode
+from .nexus import accumulate_nexus_histogram
+from .nexus import run_basic_mode as run_nexus_basic_mode
+
+
+class HistogramSourceRunner(Protocol):
+    def accumulate_histogram(
+        self,
+        reader,
+        args: argparse.Namespace,
+        q_matrix_constants: list[float],
+        histogram_bins: int,
+        plotter,
+        *,
+        chunk_size: int,
+    ): ...
+
+    def run_basic_mode(self, reader) -> int: ...
+
+
+@dataclass(frozen=True)
+class _AdaraRunner:
+    def accumulate_histogram(
+        self,
+        reader,
+        args: argparse.Namespace,
+        q_matrix_constants: list[float],
+        histogram_bins: int,
+        plotter,
+        *,
+        _chunk_size: int,
+    ):
+        return accumulate_adara_histogram(
+            reader=reader,
+            q_matrix_constants=q_matrix_constants,
+            histogram_bins=histogram_bins,
+            histogram_q_bin_size=args.histogram_q_bin_size,
+            tof_tick_us=args.tof_tick_us,
+            plotter=plotter,
+            live_plot_refresh_every=args.live_plot_refresh_every,
+        )
+
+    def run_basic_mode(self, reader) -> int:
+        return run_adara_basic_mode(reader)
+
+
+@dataclass(frozen=True)
+class _NexusRunner:
+    def accumulate_histogram(
+        self,
+        reader,
+        args: argparse.Namespace,
+        q_matrix_constants: list[float],
+        histogram_bins: int,
+        plotter,
+        *,
+        chunk_size: int,
+    ):
+        return accumulate_nexus_histogram(
+            nexus_files=reader,
+            q_matrix_constants=q_matrix_constants,
+            histogram_bins=histogram_bins,
+            histogram_q_bin_size=args.histogram_q_bin_size,
+            tof_tick_us=args.tof_tick_us,
+            plotter=plotter,
+            live_plot_refresh_every=args.live_plot_refresh_every,
+            chunk_size=chunk_size,
+        )
+
+    def run_basic_mode(self, reader) -> int:
+        return run_nexus_basic_mode(reader)
+
+
+def create_source_runner(args: argparse.Namespace) -> HistogramSourceRunner:
+    if args.nexus_file is not None:
+        return _NexusRunner()
+    return _AdaraRunner()
+
+
+__all__ = ["HistogramSourceRunner", "build_reader", "create_source_runner"]

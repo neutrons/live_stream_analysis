@@ -4,11 +4,11 @@ import argparse
 import csv
 from pathlib import Path
 
-from .nexus import reduce_nexus_files, write_reduction_csv
 from .instrument import (
     build_detector_geometry,
     build_synthetic_tof_spectrum,
 )
+from .nexus import reduce_nexus_files, write_reduction_csv
 
 
 def convert_to_iq(
@@ -173,7 +173,9 @@ def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
     )
     parser.add_argument("--q-min", type=float, default=0.0, help="Minimum Q for NeXus reduction mode.")
     parser.add_argument("--q-max", type=float, default=30.0, help="Maximum Q for NeXus reduction mode.")
-    parser.add_argument("--peak-window", type=int, default=31, help="Smoothing window for normalization peak stripping.")
+    parser.add_argument(
+        "--peak-window", type=int, default=31, help="Smoothing window for normalization peak stripping."
+    )
     parser.add_argument(
         "--peak-z-threshold",
         type=float,
