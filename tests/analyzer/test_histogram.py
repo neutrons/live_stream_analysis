@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 
 import pytest
 
-from live_stream_analysis.analyzer.histogram import apply_corrections, load_q_matrix_constants, validate_histogram_args
+from live_stream_analysis.analyzer.histogram import (
+    PixelQConversion,
+    apply_corrections,
+    load_pixel_q_conversion,
+    load_q_matrix_constants,
+    pixel_tof_to_q,
+    validate_histogram_args,
+)
 
 
 def test_load_q_matrix_constants_maps_pixel_ids(tmp_path: Path):
@@ -37,6 +45,47 @@ def test_validate_histogram_args_rejects_non_multiple_q_range():
 
     with pytest.raises(ValueError, match="integer multiple"):
         validate_histogram_args(args)
+
+
+def test_load_pixel_q_conversion_reads_optional_calibration_and_use_columns(tmp_path: Path):
+    pixel_csv = tmp_path / "pixel_geometry.csv"
+    pixel_csv.write_text(
+        "\n".join(
+            [
+                "pixel id,L2 value,theta value,TOF-to-Q matrix element,difc,difa,tzero,use",
+                "0,1.0,1.0,0.0,0.0,0.0,0.0,1",
+                "1,1.0,1.0,12.56637061,2.0,0.1,5.0,0",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    conversion = load_pixel_q_conversion(str(pixel_csv))
+
+    assert conversion.difc[1] == pytest.approx(2.0)
+    assert conversion.difa[1] == pytest.approx(0.1)
+    assert conversion.tzero[1] == pytest.approx(5.0)
+    assert conversion.use[1] == 0
+    assert conversion.q_matrix_constants[1] == 0.0
+
+
+def test_pixel_tof_to_q_handles_linear_and_quadratic_branches():
+    conversion = PixelQConversion(
+        q_matrix_constants=[12.566370614359172, 0.0, 0.0],
+        difc=[2.0, 2.0, 2.0],
+        difa=[0.0, 0.1, -0.1],
+        tzero=[0.0, 0.0, 0.0],
+        use=[1, 1, 1],
+    )
+
+    q_linear = pixel_tof_to_q(conversion, 0, tof_us=10.0)
+    q_quadratic_pos = pixel_tof_to_q(conversion, 1, tof_us=10.0)
+    q_quadratic_neg = pixel_tof_to_q(conversion, 2, tof_us=10.0)
+
+    assert q_linear == pytest.approx((2.0 * math.pi * 2.0) / 10.0)
+    assert q_quadratic_pos is not None and q_quadratic_pos > 0.0
+    assert q_quadratic_neg is not None and q_quadratic_neg > 0.0
 
 
 def test_apply_corrections_propagates_background_and_normalization(tmp_path: Path):

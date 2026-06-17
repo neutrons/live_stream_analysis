@@ -50,6 +50,12 @@ def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         help="Histogram bin width in Q units (default: 0.02).",
     )
     parser.add_argument(
+        "--histogram-q-min",
+        type=float,
+        default=0.0,
+        help="Expected Q lower bound used for bin scaling (default: 0.0).",
+    )
+    parser.add_argument(
         "--histogram-q-max",
         type=float,
         default=30.0,

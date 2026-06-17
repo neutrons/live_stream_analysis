@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import math
 
+from .histogram import PixelQConversion, pixel_tof_to_q
 from .live_plot import HistogramPlotter, maybe_update_live_plot
 
 
@@ -40,8 +41,9 @@ def build_reader(args: argparse.Namespace):
 
 def accumulate_adara_histogram(
     reader,
-    q_matrix_constants: list[float],
+    q_conversion: PixelQConversion,
     histogram_bins: int,
+    histogram_q_min: float,
     histogram_q_bin_size: float,
     tof_tick_us: float,
     plotter: HistogramPlotter,
@@ -52,21 +54,16 @@ def accumulate_adara_histogram(
     histogram_events = 0
     hist = [0] * histogram_bins
 
-    inv_tof_tick_us = 1.0 / tof_tick_us
-
     for packet in reader.read_generator():
         packet_count += 1
         events = packet.get_events()
         total_events += len(events)
 
         for pixel_id, tof in events:
-            if pixel_id < 0 or pixel_id >= len(q_matrix_constants):
+            q = pixel_tof_to_q(q_conversion, pixel_id, float(tof) * tof_tick_us)
+            if q is None:
                 continue
-            if tof <= 0:
-                continue
-
-            q = (q_matrix_constants[pixel_id] * inv_tof_tick_us) / tof
-            bram_index = int(q / histogram_q_bin_size)
+            bram_index = int((q - histogram_q_min) / histogram_q_bin_size)
             if 0 <= bram_index < histogram_bins:
                 hist[bram_index] += 1
                 histogram_events += 1

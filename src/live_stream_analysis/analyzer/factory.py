@@ -6,6 +6,7 @@ from typing import Protocol
 
 from .adara import accumulate_adara_histogram, build_reader
 from .adara import run_basic_mode as run_adara_basic_mode
+from .histogram import PixelQConversion
 from .nexus import accumulate_nexus_histogram
 from .nexus import run_basic_mode as run_nexus_basic_mode
 
@@ -15,7 +16,7 @@ class HistogramSourceRunner(Protocol):
         self,
         reader,
         args: argparse.Namespace,
-        q_matrix_constants: list[float],
+        q_conversion: PixelQConversion,
         histogram_bins: int,
         plotter,
         *,
@@ -31,7 +32,7 @@ class _AdaraRunner:
         self,
         reader,
         args: argparse.Namespace,
-        q_matrix_constants: list[float],
+        q_conversion: PixelQConversion,
         histogram_bins: int,
         plotter,
         *,
@@ -40,8 +41,9 @@ class _AdaraRunner:
         _ = chunk_size
         return accumulate_adara_histogram(
             reader=reader,
-            q_matrix_constants=q_matrix_constants,
+            q_conversion=q_conversion,
             histogram_bins=histogram_bins,
+            histogram_q_min=args.histogram_q_min,
             histogram_q_bin_size=args.histogram_q_bin_size,
             tof_tick_us=args.tof_tick_us,
             plotter=plotter,
@@ -59,7 +61,7 @@ class _NexusRunner:
         self,
         reader,
         args: argparse.Namespace,
-        q_matrix_constants: list[float],
+        q_conversion: PixelQConversion,
         histogram_bins: int,
         plotter,
         *,
@@ -67,8 +69,9 @@ class _NexusRunner:
     ):
         return accumulate_nexus_histogram(
             nexus_files=reader,
-            q_matrix_constants=q_matrix_constants,
+            q_conversion=q_conversion,
             histogram_bins=histogram_bins,
+            histogram_q_min=args.histogram_q_min,
             histogram_q_bin_size=args.histogram_q_bin_size,
             tof_tick_us=args.tof_tick_us,
             plotter=plotter,

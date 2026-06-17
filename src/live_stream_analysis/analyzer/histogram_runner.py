@@ -8,7 +8,7 @@ from pathlib import Path
 
 from . import nexus
 from .factory import build_reader, create_source_runner
-from .histogram import apply_corrections, load_q_matrix_constants, validate_histogram_args, write_histogram_csv
+from .histogram import apply_corrections, load_pixel_q_conversion, validate_histogram_args, write_histogram_csv
 from .live_plot import HistogramPlotter, create_live_histogram_plotter, maybe_update_live_plot
 
 
@@ -16,14 +16,14 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
     plotter: HistogramPlotter | None = None
     try:
         histogram_bins = validate_histogram_args(args)
-        q_matrix_constants = load_q_matrix_constants(args.histogram_pixel_geometry_csv)
+        q_conversion = load_pixel_q_conversion(args.histogram_pixel_geometry_csv)
         plotter = create_live_histogram_plotter(args, histogram_bins)
         runner = create_source_runner(args)
         chunk_size = nexus.DEFAULT_NEXUS_CHUNK_SIZE
         packet_count, total_events, histogram_events, hist = runner.accumulate_histogram(
             reader,
             args,
-            q_matrix_constants,
+            q_conversion,
             histogram_bins,
             plotter,
             chunk_size=chunk_size,
@@ -54,6 +54,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 corrected_error,
                 args.histogram_output_csv,
                 args.histogram_q_bin_size,
+                args.histogram_q_min,
             )
         except OSError as exc:
             print(f"Error writing histogram output: {exc}", file=sys.stderr)
@@ -67,6 +68,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
     if args.normalization is not None:
         print(f"Normalization CSV    : {Path(args.normalization).resolve()}")
     print(f"Histogram bins       : {histogram_bins}")
+    print(f"Histogram Q min      : {args.histogram_q_min}")
     print(f"Histogram Q bin size : {args.histogram_q_bin_size}")
     print(f"Histogram Q max      : {args.histogram_q_max}")
     print(f"TOF tick size (us)   : {args.tof_tick_us}")

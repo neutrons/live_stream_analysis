@@ -62,6 +62,56 @@ def _minimal_idf() -> str:
 """
 
 
+def _minimal_preparer_idf() -> str:
+    return """<?xml version='1.0' encoding='UTF-8'?>
+<instrument name='TEST' xmlns='http://www.mantidproject.org/IDF/1.0'>
+    <component type='moderator'>
+        <location z='-1.0' />
+    </component>
+    <type name='moderator' is='Source' />
+    <component type='sample-position'>
+        <location />
+    </component>
+    <type name='sample-position' is='SamplePos' />
+    <idlist idname='bank1_ids'>
+        <id val='1' />
+    </idlist>
+    <component type='bank1' idlist='bank1_ids'>
+        <location x='1.0' y='0.0' z='0.0' />
+    </component>
+    <type name='bank1'>
+        <component type='pixel'>
+            <location />
+        </component>
+    </type>
+    <type name='pixel' is='detector' />
+</instrument>
+"""
+
+
+def _write_diffcal(
+    tmp_path: Path,
+    name: str,
+    detids: list[int],
+    difc: list[float],
+    difa: list[float],
+    tzero: list[float],
+    use: list[int],
+) -> Path:
+    path = tmp_path / name
+    with h5py.File(path, "w") as handle:
+        calibration = handle.create_group("calibration")
+        calibration.create_dataset("detid", data=np.array(detids, dtype=np.int32))
+        calibration.create_dataset("difc", data=np.array(difc, dtype=np.float64))
+        calibration.create_dataset("difa", data=np.array(difa, dtype=np.float64))
+        calibration.create_dataset("tzero", data=np.array(tzero, dtype=np.float64))
+        calibration.create_dataset("use", data=np.array(use, dtype=np.int32))
+        instrument = calibration.create_group("instrument")
+        instrument.create_dataset("name", data=np.array([b"NOMAD"]))
+        instrument.create_dataset("instrument_source", data=np.array([b"NOMAD_Definition.xml"]))
+    return path
+
+
 # ---------------------------------------------------------------------------
 # Parser registration
 # ---------------------------------------------------------------------------
@@ -101,7 +151,9 @@ class TestAnalyzerHelpers:
             encoding="utf-8",
         )
 
-        values, errors = load_correction_csv(str(correction_csv), expected_bins=3, q_bin_size=0.02, q_max=0.05)
+        values, errors = load_correction_csv(
+            str(correction_csv), expected_bins=3, q_bin_size=0.02, q_min=0.0, q_max=0.05
+        )
 
         assert values == [5.0, 7.0, 0.0]
         assert errors == [2.0, 3.0, 0.0]
@@ -330,6 +382,44 @@ class TestAdaraFileCLI:
         assert "1500" in out
         histogram_lines = histogram_csv.read_text(encoding="utf-8")
         assert "29.99000000,1.00000000,1.00000000" in histogram_lines
+
+    def test_histogram_q_min_offsets_bins_and_csv_q_values(self, tmp_path: Path):
+        path = _write_adara(tmp_path, event_packet([(1, 1)]))
+        pixel_csv = tmp_path / "pixel_geometry.csv"
+        pixel_csv.write_text(
+            "\n".join(
+                [
+                    "pixel id,L2 value,theta value,TOF-to-Q matrix element",
+                    "0,1.0,1.0,0.0",
+                    "1,1.0,1.0,0.61",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        histogram_csv = tmp_path / "histogram_q_min.csv"
+
+        rc = main(
+            [
+                "analyze",
+                "--adara-file",
+                str(path),
+                "--histogram-pixel-geometry-csv",
+                str(pixel_csv),
+                "--histogram-q-min",
+                "0.6",
+                "--histogram-q-max",
+                "1.0",
+                "--histogram-q-bin-size",
+                "0.02",
+                "--histogram-output-csv",
+                str(histogram_csv),
+            ]
+        )
+
+        assert rc == 0
+        histogram_lines = histogram_csv.read_text(encoding="utf-8").splitlines()
+        assert histogram_lines[1] == "0.61000000,1.00000000,1.00000000"
 
     def test_histogram_mode_applies_background_subtraction_and_normalization(self, tmp_path: Path, capsys):
         path = _write_adara(tmp_path, event_packet([(1, 1), (1, 1), (1, 1), (1, 1)]))
@@ -694,3 +784,115 @@ class TestNexusFileCLI:
         err = capsys.readouterr().err
         assert "Processing NeXus chunks" in err
         assert "2/2" in err
+
+
+class TestPreparedPixelGeometryCalibrationIntegration:
+    def test_adara_histogram_uses_use_mask_from_preparer_calibrated_pixel_csv(self, tmp_path: Path, capsys):
+        idf_path = tmp_path / "test_definition.xml"
+        idf_path.write_text(_minimal_preparer_idf(), encoding="utf-8")
+        calibration_path = _write_diffcal(
+            tmp_path,
+            "calibration.h5",
+            detids=[1],
+            difc=[1000.0],
+            difa=[0.0],
+            tzero=[0.0],
+            use=[0],
+        )
+        pixel_csv = tmp_path / "pixel_geometry_calibrated.csv"
+        iq_csv = tmp_path / "iq.csv"
+
+        preparer_rc = main(
+            [
+                "preparer",
+                "--idf-file",
+                str(idf_path),
+                "--calibration-file",
+                str(calibration_path),
+                "--pixel-geometry-csv",
+                str(pixel_csv),
+                "--iq-csv",
+                str(iq_csv),
+                "--q-bins",
+                "20",
+            ]
+        )
+        assert preparer_rc == 0
+
+        adara_path = _write_adara(tmp_path, event_packet([(1, 100)]))
+        histogram_csv = tmp_path / "histogram.csv"
+        analyzer_rc = main(
+            [
+                "analyze",
+                "--adara-file",
+                str(adara_path),
+                "--histogram-pixel-geometry-csv",
+                str(pixel_csv),
+                "--histogram-q-max",
+                "30",
+                "--histogram-q-bin-size",
+                "0.02",
+                "--histogram-output-csv",
+                str(histogram_csv),
+            ]
+        )
+
+        assert analyzer_rc == 0
+        out = capsys.readouterr().out
+        assert "Histogrammed events" in out
+        assert "0" in out
+
+    def test_nexus_histogram_uses_use_mask_from_preparer_calibrated_pixel_csv(self, tmp_path: Path, capsys):
+        idf_path = tmp_path / "test_definition.xml"
+        idf_path.write_text(_minimal_preparer_idf(), encoding="utf-8")
+        calibration_path = _write_diffcal(
+            tmp_path,
+            "calibration.h5",
+            detids=[1],
+            difc=[1000.0],
+            difa=[0.0],
+            tzero=[0.0],
+            use=[0],
+        )
+        pixel_csv = tmp_path / "pixel_geometry_calibrated.csv"
+        iq_csv = tmp_path / "iq.csv"
+
+        preparer_rc = main(
+            [
+                "preparer",
+                "--idf-file",
+                str(idf_path),
+                "--calibration-file",
+                str(calibration_path),
+                "--pixel-geometry-csv",
+                str(pixel_csv),
+                "--iq-csv",
+                str(iq_csv),
+                "--q-bins",
+                "20",
+            ]
+        )
+        assert preparer_rc == 0
+
+        nexus_path = _write_nexus(tmp_path, "sample.nxs.h5", [1], [100.0], _minimal_idf())
+        histogram_csv = tmp_path / "histogram_nexus.csv"
+        analyzer_rc = main(
+            [
+                "analyze",
+                "--nexus-file",
+                str(nexus_path),
+                "--histogram-pixel-geometry-csv",
+                str(pixel_csv),
+                "--histogram-q-max",
+                "30",
+                "--histogram-q-bin-size",
+                "0.02",
+                "--histogram-output-csv",
+                str(histogram_csv),
+            ]
+        )
+
+        assert analyzer_rc == 0
+        out = capsys.readouterr().out
+        assert "Histogrammed events" in out
+        assert "0" in out

@@ -7,6 +7,7 @@ import pytest
 from readadara import AdaraFileReader
 
 from live_stream_analysis.analyzer.adara import accumulate_adara_histogram, build_reader
+from live_stream_analysis.analyzer.histogram import PixelQConversion
 from live_stream_analysis.analyzer.live_plot import NullHistogramPlotter
 from tests.analyzer.adara_fixtures import event_packet
 
@@ -51,10 +52,17 @@ def test_build_reader_rejects_non_integer_stream_port():
 
 def test_accumulate_adara_histogram_uses_pixel_id_then_tof_tuple_order():
     reader = _Reader([_Packet([(1, 100)])])
+    q_conversion = PixelQConversion(
+        q_matrix_constants=[0.0, 1000.0],
+        difc=[0.0, 1000.0 / (2.0 * 3.141592653589793)],
+        difa=[0.0, 0.0],
+        tzero=[0.0, 0.0],
+        use=[1, 1],
+    )
 
     packet_count, total_events, histogram_events, hist = accumulate_adara_histogram(
         reader=reader,
-        q_matrix_constants=[0.0, 1000.0],
+        q_conversion=q_conversion,
         histogram_bins=600,
         histogram_q_bin_size=0.02,
         tof_tick_us=1.0,

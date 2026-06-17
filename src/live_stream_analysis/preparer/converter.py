@@ -2,13 +2,17 @@
 
 import argparse
 import csv
+import math
 from pathlib import Path
 
+from .calibration import DetectorCalibration, load_diffraction_calibration
 from .instrument import (
     build_detector_geometry,
     build_synthetic_tof_spectrum,
 )
 from .nexus import reduce_nexus_files, write_reduction_csv
+
+TWO_PI = 2.0 * math.pi
 
 
 def convert_to_iq(
@@ -52,15 +56,59 @@ def write_pixel_geometry_csv(
     rows: list[tuple[int, float, float, float, float]],
     output_csv: Path,
     q_matrix_scale: float = 1.0,
+    calibration_by_detector: dict[int, DetectorCalibration] | None = None,
 ) -> None:
     output_csv = output_csv.resolve()
     output_csv.parent.mkdir(parents=True, exist_ok=True)
 
     with output_csv.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["pixel id", "L2 value", "theta value", "TOF-to-Q matrix element"])
+        include_calibration_columns = calibration_by_detector is not None
+        if include_calibration_columns:
+            writer.writerow(
+                [
+                    "pixel id",
+                    "L2 value",
+                    "theta value",
+                    "TOF-to-Q matrix element",
+                    "difc",
+                    "difa",
+                    "tzero",
+                    "use",
+                ]
+            )
+        else:
+            writer.writerow(["pixel id", "L2 value", "theta value", "TOF-to-Q matrix element"])
+
         for det_id, l2, theta_deg, _, q_matrix_element in rows:
-            writer.writerow([det_id, f"{l2:.8f}", f"{theta_deg:.8f}", f"{q_matrix_element * q_matrix_scale:.8f}"])
+            if include_calibration_columns:
+                calibration = calibration_by_detector.get(det_id) if calibration_by_detector is not None else None
+                if calibration is None:
+                    difc = q_matrix_element / TWO_PI
+                    difa = 0.0
+                    tzero = 0.0
+                    use = 1
+                else:
+                    difc = calibration.difc
+                    difa = calibration.difa
+                    tzero = calibration.tzero
+                    use = calibration.use
+
+                calibrated_q_matrix = TWO_PI * difc
+                writer.writerow(
+                    [
+                        det_id,
+                        f"{l2:.8f}",
+                        f"{theta_deg:.8f}",
+                        f"{calibrated_q_matrix * q_matrix_scale:.8f}",
+                        f"{difc:.8f}",
+                        f"{difa:.8f}",
+                        f"{tzero:.8f}",
+                        str(use),
+                    ]
+                )
+            else:
+                writer.writerow([det_id, f"{l2:.8f}", f"{theta_deg:.8f}", f"{q_matrix_element * q_matrix_scale:.8f}"])
 
 
 def write_iq_csv(q_centers: list[float], iq: list[float], output_csv: Path) -> None:
@@ -99,6 +147,7 @@ def run_preparer(
     bin_width: float,
     q_bins: int,
     q_matrix_scale: float = 1.0,
+    calibration_file: Path | None = None,
     plot: bool = False,
 ) -> tuple[int, int]:
     """Run the end-to-end pure-Python pre-processing workflow."""
@@ -107,7 +156,15 @@ def run_preparer(
         raise FileNotFoundError(f"IDF file does not exist: {idf_path}")
 
     geometry_rows = build_detector_geometry(idf_path)
-    write_pixel_geometry_csv(geometry_rows, pixel_geometry_csv, q_matrix_scale=q_matrix_scale)
+    calibration_by_detector = None
+    if calibration_file is not None:
+        calibration_by_detector = load_diffraction_calibration(calibration_file)
+    write_pixel_geometry_csv(
+        geometry_rows,
+        pixel_geometry_csv,
+        q_matrix_scale=q_matrix_scale,
+        calibration_by_detector=calibration_by_detector,
+    )
 
     tof_centers, y_counts = build_synthetic_tof_spectrum(x_min, x_max, bin_width)
     q_centers, iq = convert_to_iq(geometry_rows, tof_centers, y_counts, q_bins)
@@ -149,6 +206,15 @@ def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         help=(
             "Scale factor applied to TOF-to-Q matrix elements in pixel geometry CSV. "
             "Use 10.0 for ADARA TOF ticks that represent 0.1 microseconds."
+        ),
+    )
+    parser.add_argument(
+        "--calibration-file",
+        type=Path,
+        default=None,
+        help=(
+            "Optional Mantid Diffraction Calibration HDF5 file. "
+            "When supplied, pixel geometry CSV includes calibrated difc/difa/tzero and use mask columns."
         ),
     )
     parser.add_argument("--plot", action="store_true", help="Plot I(Q) with matplotlib.")
@@ -220,6 +286,7 @@ def run_from_namespace(args: argparse.Namespace) -> int:
         bin_width=args.bin_width,
         q_bins=args.q_bins,
         q_matrix_scale=args.q_matrix_scale,
+        calibration_file=args.calibration_file,
         plot=args.plot,
     )
     print(f"Loaded IDF: {args.idf_file.resolve()}")
@@ -227,4 +294,6 @@ def run_from_namespace(args: argparse.Namespace) -> int:
     print(f"Pixel geometry CSV: {args.pixel_geometry_csv.resolve()}")
     print(f"I(Q) CSV: {args.iq_csv.resolve()} ({n_q_bins} bins)")
     print(f"Q-matrix scale applied: {args.q_matrix_scale}")
+    if args.calibration_file is not None:
+        print(f"Calibration file: {args.calibration_file.resolve()}")
     return 0

@@ -7,7 +7,7 @@ Repository for working on live stream analysis
 The package includes a pure-Python helper CLI subcommand for pre-processing Mantid IDF XML files.
 It generates:
 
-1. Pixel geometry CSV with columns: pixel id, L2 value, theta value.
+1. Pixel geometry CSV with columns: pixel id, L2 value, theta value, TOF-to-Q matrix element.
 2. Synthetic I(Q) CSV from a TOF-to-Q conversion workflow.
 
 Example:
@@ -17,6 +17,47 @@ uv run live_stream_analysis preparer \
     --idf-file tests/data/idf/NOMAD_Definition.xml \
     --pixel-geometry-csv pixel_geometry.csv \
     --iq-csv iq.csv
+```
+
+### Optional: apply Mantid diffraction calibration
+
+You can optionally pass a Mantid Diffraction Calibration HDF5 file (`SaveDiffCal` format)
+to generate a calibration-aware pixel geometry CSV.
+
+When `--calibration-file` is supplied, the pixel geometry CSV adds these columns:
+
+1. `difc`
+2. `difa`
+3. `tzero`
+4. `use`
+
+The analyzer will use these values for TOF+pixel to Q conversion via:
+
+1. `TOF = DIFA*d^2 + DIFC*d + TZERO`
+2. `Q = 2*pi/d`
+
+and it treats `use=0` as masked (detector excluded from histogramming).
+
+Example with one of the provided calibration files:
+
+```bash
+uv run live_stream_analysis preparer \
+    --idf-file tests/data/idf/NOMAD_Definition.xml \
+    --calibration-file nexus_files/calibration/NOMAD_241348_2026-05-13_shifter.h5 \
+    --pixel-geometry-csv pixel_geometry_calibrated.csv \
+    --iq-csv iq.csv
+```
+
+Then use the calibrated geometry directly in analyzer:
+
+```bash
+uv run live_stream_analysis analyze \
+    --adara-file /path/to/file.adara \
+    --histogram-pixel-geometry-csv pixel_geometry_calibrated.csv \
+    --histogram-q-bin-size 0.02 \
+    --histogram-q-max 100 \
+    --tof-tick-us 1.0 \
+    --histogram-output-csv sample_histogram.csv
 ```
 
 For ADARA histogram workflows where TOF ticks are 0.1 microseconds, pre-scale the
