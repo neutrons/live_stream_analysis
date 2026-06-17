@@ -172,3 +172,7 @@ cython_debug/
 # do not track conda package archives
 *.conda
 *.csv
+
+adara_mount
+nexus_files
+repos
