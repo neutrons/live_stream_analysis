@@ -42,6 +42,36 @@ uv run live_stream_analysis analyze \
     --histogram-output-txt bram_values_python_all.txt
 ```
 
+To run the same analysis inside Docker, mount the directory that contains your
+ADARA file, pixel geometry CSV, and desired output path into the container.
+From the repository root, this works with the current image:
+
+```bash
+docker build -t live-stream-analysis .
+docker run --rm -v "$PWD":/work -w /work live-stream-analysis \
+    live_stream_analysis analyze \
+    --adara-file adara_mount/20250201/adara_streams/NOMAD.Raw.Data.Runs.208511-208543/20250131-101613.350178410-run-208511/m00000001-f00000001-run-208511.adara \
+    --histogram-pixel-geometry-csv pixel_geometry.csv \
+    --histogram-q-bin-size 0.02 \
+    --histogram-q-max 30 \
+    --tof-tick-us 1.0 \
+    --histogram-output-txt bram_values_python_all.txt
+```
+
+Without the `-v "$PWD":/work -w /work` mount, the container cannot see files
+from your host filesystem, so relative paths like `adara_mount/...` will fail.
+
+To plot the generated `bram_values_python_all.txt`, install the optional plotting
+dependencies and run:
+
+```bash
+uv sync --group jupyter
+uv run --group jupyter python scripts/plot_bram_histogram.py bram_values_python_all.txt --output-png bram_values_python_all.png --max-bin 500 --q-bin-size 0.02
+```
+
+The plotting script uses Q on the x-axis by default. Use `--x-axis bin` if you
+want to plot raw histogram bin indices instead.
+
 If you use an unscaled pixel geometry CSV, set `--tof-tick-us 0.1` instead.
 
 Note: current parser coverage is validated for NOMAD IDF fixtures. A POWGEN fixture is included in tests for parser study/regression coverage.
