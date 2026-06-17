@@ -4,6 +4,7 @@ import argparse
 import csv
 from pathlib import Path
 
+from .nexus import reduce_nexus_files, write_reduction_csv
 from .instrument import (
     build_detector_geometry,
     build_synthetic_tof_spectrum,
@@ -124,7 +125,7 @@ def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         "preparer",
         help="Generate detector geometry and synthetic I(Q) CSV from an IDF XML file.",
     )
-    parser.add_argument("--idf-file", type=Path, required=True, help="Path to Mantid IDF XML file.")
+    parser.add_argument("--idf-file", type=Path, help="Path to Mantid IDF XML file.")
     parser.add_argument(
         "--pixel-geometry-csv",
         type=Path,
@@ -151,12 +152,63 @@ def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         ),
     )
     parser.add_argument("--plot", action="store_true", help="Plot I(Q) with matplotlib.")
+    parser.add_argument(
+        "--mode",
+        choices=("idf", "background", "normalization"),
+        default="idf",
+        help="Run the original IDF synthetic workflow or reduce NeXus files for background/normalization CSV output.",
+    )
+    parser.add_argument(
+        "--nexus-file",
+        type=Path,
+        action="append",
+        default=None,
+        help="Input NeXus event file. Repeat for multiple files when using background or normalization mode.",
+    )
+    parser.add_argument(
+        "--reduction-output-csv",
+        type=Path,
+        default=Path("reduction.csv"),
+        help="Output CSV path for reduced Q, I(Q), error data in background/normalization mode.",
+    )
+    parser.add_argument("--q-min", type=float, default=0.0, help="Minimum Q for NeXus reduction mode.")
+    parser.add_argument("--q-max", type=float, default=30.0, help="Maximum Q for NeXus reduction mode.")
+    parser.add_argument("--peak-window", type=int, default=31, help="Smoothing window for normalization peak stripping.")
+    parser.add_argument(
+        "--peak-z-threshold",
+        type=float,
+        default=3.0,
+        help="Residual z-score threshold used to replace vanadium peaks with a smoothed baseline.",
+    )
     parser.set_defaults(_cmd="preparer")
     return parser
 
 
 def run_from_namespace(args: argparse.Namespace) -> int:
     """Execute preparer subcommand from parsed argparse namespace."""
+    if args.mode in {"background", "normalization"}:
+        if not args.nexus_file:
+            raise ValueError("--nexus-file is required for background or normalization mode")
+        result = reduce_nexus_files(
+            nexus_files=[path.resolve() for path in args.nexus_file],
+            q_min=args.q_min,
+            q_max=args.q_max,
+            q_bin_size=0.02,
+            tof_tick_us=1.0,
+            mode=args.mode,
+            peak_window=args.peak_window,
+            peak_z_threshold=args.peak_z_threshold,
+        )
+        write_reduction_csv(result, args.reduction_output_csv)
+        print(f"Reduction mode: {args.mode}")
+        print(f"Input NeXus files: {len(args.nexus_file)}")
+        print(f"Total counts: {result.total_counts}")
+        print(f"Reduction CSV: {args.reduction_output_csv.resolve()}")
+        return 0
+
+    if args.idf_file is None:
+        raise ValueError("--idf-file is required when --mode=idf")
+
     n_pixels, n_q_bins = run_preparer(
         idf_file=args.idf_file,
         pixel_geometry_csv=args.pixel_geometry_csv,

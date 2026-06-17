@@ -107,7 +107,7 @@ class TestAdaraFileCLI:
             + "\n",
             encoding="utf-8",
         )
-        histogram_txt = tmp_path / "histogram.txt"
+        histogram_csv = tmp_path / "histogram.csv"
 
         rc = main(
             [
@@ -120,8 +120,8 @@ class TestAdaraFileCLI:
                 "100",
                 "--histogram-q-bin-size",
                 "0.02",
-                "--histogram-output-txt",
-                str(histogram_txt),
+                "--histogram-output-csv",
+                str(histogram_csv),
             ]
         )
 
@@ -129,9 +129,10 @@ class TestAdaraFileCLI:
         out = capsys.readouterr().out
         assert "Histogrammed events" in out
         assert "2" in out
-        assert histogram_txt.exists()
-        histogram_lines = histogram_txt.read_text(encoding="utf-8")
-        assert "Index:4950 - Counts:2" in histogram_lines
+        assert histogram_csv.exists()
+        histogram_lines = histogram_csv.read_text(encoding="utf-8").splitlines()
+        assert histogram_lines[0] == "Q value,I(Q),Error I(Q)"
+        assert "99.01000000,2.00000000,1.41421356" in histogram_lines
 
     def test_histogram_mode_supports_unscaled_constants_with_tof_tick(self, tmp_path: Path, capsys):
         path = _write_adara(tmp_path, event_packet([(1, 1)]))
@@ -147,7 +148,7 @@ class TestAdaraFileCLI:
             + "\n",
             encoding="utf-8",
         )
-        histogram_txt = tmp_path / "histogram_tick.txt"
+        histogram_csv = tmp_path / "histogram_tick.csv"
 
         rc = main(
             [
@@ -162,8 +163,8 @@ class TestAdaraFileCLI:
                 "0.02",
                 "--tof-tick-us",
                 "0.1",
-                "--histogram-output-txt",
-                str(histogram_txt),
+                "--histogram-output-csv",
+                str(histogram_csv),
             ]
         )
 
@@ -171,8 +172,8 @@ class TestAdaraFileCLI:
         out = capsys.readouterr().out
         assert "TOF tick size (us)" in out
         assert "0.1" in out
-        histogram_lines = histogram_txt.read_text(encoding="utf-8")
-        assert "Index:4950 - Counts:1" in histogram_lines
+        histogram_lines = histogram_csv.read_text(encoding="utf-8")
+        assert "99.01000000,1.00000000,1.00000000" in histogram_lines
 
     def test_histogram_default_q_bin_size_and_q_max(self, tmp_path: Path, capsys):
         path = _write_adara(tmp_path, event_packet([(1, 1)]))
@@ -188,7 +189,7 @@ class TestAdaraFileCLI:
             + "\n",
             encoding="utf-8",
         )
-        histogram_txt = tmp_path / "histogram_defaults.txt"
+        histogram_csv = tmp_path / "histogram_defaults.csv"
 
         rc = main(
             [
@@ -197,8 +198,8 @@ class TestAdaraFileCLI:
                 str(path),
                 "--histogram-pixel-geometry-csv",
                 str(pixel_csv),
-                "--histogram-output-txt",
-                str(histogram_txt),
+                "--histogram-output-csv",
+                str(histogram_csv),
             ]
         )
 
@@ -206,5 +207,70 @@ class TestAdaraFileCLI:
         out = capsys.readouterr().out
         assert "Histogram bins" in out
         assert "1500" in out
-        histogram_lines = histogram_txt.read_text(encoding="utf-8")
-        assert "Index:1499 - Counts:1" in histogram_lines
+        histogram_lines = histogram_csv.read_text(encoding="utf-8")
+        assert "29.99000000,1.00000000,1.00000000" in histogram_lines
+
+    def test_histogram_mode_applies_background_subtraction_and_normalization(self, tmp_path: Path, capsys):
+        path = _write_adara(tmp_path, event_packet([(1, 1), (1, 1), (1, 1), (1, 1)]))
+        pixel_csv = tmp_path / "pixel_geometry.csv"
+        pixel_csv.write_text(
+            "\n".join(
+                [
+                    "pixel id,L2 value,theta value,TOF-to-Q matrix element",
+                    "0,1.0,1.0,0.0",
+                    "1,1.0,1.0,99.0",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        background_csv = tmp_path / "background.csv"
+        background_csv.write_text(
+            "\n".join(
+                [
+                    "Q value,I(Q),Error I(Q)",
+                    "99.01000000,2.00000000,1.41421356",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        normalization_csv = tmp_path / "normalization.csv"
+        normalization_csv.write_text(
+            "\n".join(
+                [
+                    "Q value,I(Q),Error I(Q)",
+                    "99.01000000,2.00000000,1.41421356",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        histogram_csv = tmp_path / "histogram_corrected.csv"
+
+        rc = main(
+            [
+                "analyze",
+                "--adara-file",
+                str(path),
+                "--histogram-pixel-geometry-csv",
+                str(pixel_csv),
+                "--histogram-q-max",
+                "100",
+                "--histogram-q-bin-size",
+                "0.02",
+                "--background-subtraction",
+                str(background_csv),
+                "--normalization",
+                str(normalization_csv),
+                "--histogram-output-csv",
+                str(histogram_csv),
+            ]
+        )
+
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Background CSV" in out
+        assert "Normalization CSV" in out
+        histogram_lines = histogram_csv.read_text(encoding="utf-8")
+        assert "99.01000000,1.00000000,1.22474487" in histogram_lines

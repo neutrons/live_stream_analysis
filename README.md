@@ -39,7 +39,7 @@ uv run live_stream_analysis analyze \
     --histogram-q-bin-size 0.02 \
     --histogram-q-max 100 \
     --tof-tick-us 1.0 \
-    --histogram-output-txt bram_values_python_all.txt
+    --histogram-output-csv sample_histogram.csv
 ```
 
 To run the same analysis inside Docker, mount the directory that contains your
@@ -55,22 +55,59 @@ docker run --rm -v "$PWD":/work -w /work live-stream-analysis \
     --histogram-q-bin-size 0.02 \
     --histogram-q-max 30 \
     --tof-tick-us 1.0 \
-    --histogram-output-txt bram_values_python_all.txt
+    --histogram-output-csv sample_histogram.csv
 ```
 
 Without the `-v "$PWD":/work -w /work` mount, the container cannot see files
 from your host filesystem, so relative paths like `adara_mount/...` will fail.
 
-To plot the generated `bram_values_python_all.txt`, install the optional plotting
+To inspect the generated histogram CSV interactively, install the optional plotting
 dependencies and run:
 
 ```bash
 uv sync --group jupyter
-uv run --group jupyter python scripts/plot_bram_histogram.py bram_values_python_all.txt --output-png bram_values_python_all.png --max-bin 500 --q-bin-size 0.02
+uv run --group jupyter python scripts/plot_csv_histogram.py sample_histogram.csv
 ```
 
-The plotting script uses Q on the x-axis by default. Use `--x-axis bin` if you
-want to plot raw histogram bin indices instead.
+If you also want to save the current view to disk, add `--output-png`:
+
+```bash
+uv run --group jupyter python scripts/plot_csv_histogram.py sample_histogram.csv --output-png sample_histogram.png
+```
+
+To compare sample, background, normalization, and corrected outputs on one figure,
+either overlay them:
+
+```bash
+uv run --group jupyter python scripts/plot_csv_histogram.py \
+    --input sample_histogram.csv \
+    --input background.csv \
+    --input normalization.csv \
+    --input corrected_histogram.csv \
+    --label Sample \
+    --label Background \
+    --label Normalization \
+    --label Corrected \
+    --mode overlay
+```
+
+or split them into stacked subplots when the scales differ too much:
+
+```bash
+uv run --group jupyter python scripts/plot_csv_histogram.py \
+    --input sample_histogram.csv \
+    --input background.csv \
+    --input normalization.csv \
+    --input corrected_histogram.csv \
+    --label Sample \
+    --label Background \
+    --label Normalization \
+    --label Corrected \
+    --mode subplots
+```
+
+The plotting script uses Q on the x-axis and includes shaded error bands by default.
+Use `--x-min`, `--x-max`, or `--hide-error-band` to simplify the view when needed.
 
 If you use an unscaled pixel geometry CSV, set `--tof-tick-us 0.1` instead.
 

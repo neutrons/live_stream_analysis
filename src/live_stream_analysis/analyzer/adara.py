@@ -68,9 +68,19 @@ def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         ),
     )
     parser.add_argument(
-        "--histogram-output-txt",
+        "--histogram-output-csv",
         metavar="FILE",
-        help="Optional output text file with one line per bin: 'Index:<i> - Counts:<n>'.",
+        help="Optional output CSV file with columns: Q value, I(Q), Error I(Q).",
+    )
+    parser.add_argument(
+        "--background-subtraction",
+        metavar="FILE",
+        help="Optional three-column CSV with Q value, I(Q), Error I(Q) to subtract from the histogrammed signal.",
+    )
+    parser.add_argument(
+        "--normalization",
+        metavar="FILE",
+        help="Optional three-column CSV with Q value, I(Q), Error I(Q) used to normalize the histogrammed signal.",
     )
 
     return parser
@@ -107,12 +117,104 @@ def _load_q_matrix_constants(pixel_geometry_csv: str) -> list[float]:
     return q_matrix_constants
 
 
-def _write_histogram_txt(hist: list[int], output_path: str) -> None:
+def _write_histogram_csv(
+    intensity: list[float],
+    error: list[float],
+    output_path: str,
+    q_bin_size: float,
+) -> None:
     path = Path(output_path).resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        for index, counts in enumerate(hist):
-            handle.write(f"Index:{index} - Counts:{counts}\n")
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["Q value", "I(Q)", "Error I(Q)"])
+        for index, (y_value, err_value) in enumerate(zip(intensity, error, strict=True)):
+            q_value = (index + 0.5) * q_bin_size
+            writer.writerow([f"{q_value:.8f}", f"{y_value:.8f}", f"{err_value:.8f}"])
+
+
+def _load_correction_csv(
+    csv_path: str,
+    expected_bins: int,
+    q_bin_size: float,
+    q_max: float,
+) -> tuple[list[float], list[float]]:
+    path = Path(csv_path).resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"Correction CSV does not exist: {path}")
+
+    values = [0.0] * expected_bins
+    errors = [0.0] * expected_bins
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        required_columns = {"Q value", "I(Q)", "Error I(Q)"}
+        if reader.fieldnames is None or not required_columns.issubset(set(reader.fieldnames)):
+            raise ValueError("Correction CSV must include columns: 'Q value', 'I(Q)', 'Error I(Q)'")
+
+        for row in reader:
+            q_value = float(row["Q value"])
+            intensity = float(row["I(Q)"])
+            error = float(row["Error I(Q)"])
+            bin_index = int(q_value / q_bin_size)
+            if 0 <= bin_index < expected_bins and q_value <= q_max:
+                values[bin_index] = intensity
+                errors[bin_index] = error
+
+    return values, errors
+
+
+def _apply_corrections(
+    hist: list[int],
+    args: argparse.Namespace,
+    histogram_bins: int,
+) -> tuple[list[float], list[float]]:
+    corrected = [float(value) for value in hist]
+    variance = [float(value) for value in hist]
+
+    if args.background_subtraction is not None:
+        background, background_error = _load_correction_csv(
+            args.background_subtraction,
+            expected_bins=histogram_bins,
+            q_bin_size=args.histogram_q_bin_size,
+            q_max=args.histogram_q_max,
+        )
+        corrected = [value - background_value for value, background_value in zip(corrected, background)]
+        variance = [
+            value_variance + background_sigma**2
+            for value_variance, background_sigma in zip(variance, background_error, strict=True)
+        ]
+
+    if args.normalization is not None:
+        normalization, normalization_error = _load_correction_csv(
+            args.normalization,
+            expected_bins=histogram_bins,
+            q_bin_size=args.histogram_q_bin_size,
+            q_max=args.histogram_q_max,
+        )
+        next_corrected: list[float] = []
+        next_variance: list[float] = []
+        for value, value_variance, norm, norm_sigma in zip(
+            corrected,
+            variance,
+            normalization,
+            normalization_error,
+            strict=True,
+        ):
+            if norm <= 0.0:
+                next_corrected.append(0.0)
+                next_variance.append(0.0)
+                continue
+
+            quotient = value / norm
+            propagated_variance = (value_variance / (norm**2)) + ((value**2) * (norm_sigma**2) / (norm**4))
+            next_corrected.append(quotient)
+            next_variance.append(propagated_variance)
+
+        corrected = next_corrected
+        variance = next_variance
+
+    error = [math.sqrt(max(value, 0.0)) for value in variance]
+    return corrected, error
 
 
 def _accumulate_histogram(
@@ -176,6 +278,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             histogram_q_bin_size=args.histogram_q_bin_size,
             tof_tick_us=args.tof_tick_us,
         )
+        corrected_hist, corrected_error = _apply_corrections(hist, args, histogram_bins)
     except KeyboardInterrupt:
         print("Interrupted by user", file=sys.stderr)
         return 130
@@ -183,9 +286,14 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
         print(f"Error reading stream: {exc}", file=sys.stderr)
         return 1
 
-    if args.histogram_output_txt is not None:
+    if args.histogram_output_csv is not None:
         try:
-            _write_histogram_txt(hist, args.histogram_output_txt)
+            _write_histogram_csv(
+                corrected_hist,
+                corrected_error,
+                args.histogram_output_csv,
+                args.histogram_q_bin_size,
+            )
         except OSError as exc:
             print(f"Error writing histogram output: {exc}", file=sys.stderr)
             return 1
@@ -193,12 +301,16 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
     print(f"Packets read         : {packet_count}")
     print(f"Total events         : {total_events}")
     print(f"Histogrammed events  : {histogram_events}")
+    if args.background_subtraction is not None:
+        print(f"Background CSV       : {Path(args.background_subtraction).resolve()}")
+    if args.normalization is not None:
+        print(f"Normalization CSV    : {Path(args.normalization).resolve()}")
     print(f"Histogram bins       : {histogram_bins}")
     print(f"Histogram Q bin size : {args.histogram_q_bin_size}")
     print(f"Histogram Q max      : {args.histogram_q_max}")
     print(f"TOF tick size (us)   : {args.tof_tick_us}")
-    if args.histogram_output_txt is not None:
-        print(f"Histogram TXT        : {Path(args.histogram_output_txt).resolve()}")
+    if args.histogram_output_csv is not None:
+        print(f"Histogram CSV        : {Path(args.histogram_output_csv).resolve()}")
     return 0
 
 

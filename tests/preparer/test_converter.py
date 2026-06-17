@@ -86,3 +86,57 @@ def test_preparer_q_matrix_scale_option(tmp_path: Path) -> None:
     raw_first_q_matrix = rows[0][4]
 
     assert scaled_q_matrix == float(f"{raw_first_q_matrix * 10.0:.8f}")
+
+
+def test_preparer_background_reduction_mode_writes_three_column_csv(tmp_path: Path) -> None:
+    nexus_path = Path(__file__).parents[2] / "nexus_files" / "mt_pac_can" / "NOM_243710.nxs.h5"
+    output_csv = tmp_path / "background.csv"
+
+    rc = main(
+        [
+            "preparer",
+            "--mode",
+            "background",
+            "--nexus-file",
+            str(nexus_path),
+            "--reduction-output-csv",
+            str(output_csv),
+            "--q-min",
+            "0.0",
+            "--q-max",
+            "30.0",
+        ]
+    )
+
+    assert rc == 0
+    lines = output_csv.read_text(encoding="utf-8").strip().splitlines()
+    assert lines[0] == "Q value,I(Q),Error I(Q)"
+    assert len(lines) > 10
+
+
+def test_preparer_normalization_reduction_mode_accepts_multiple_files(tmp_path: Path) -> None:
+    base = Path(__file__).parents[2] / "nexus_files"
+    output_csv = tmp_path / "normalization.csv"
+
+    rc = main(
+        [
+            "preparer",
+            "--mode",
+            "normalization",
+            "--nexus-file",
+            str(base / "vanadium" / "NOM_243712.nxs.h5"),
+            "--reduction-output-csv",
+            str(output_csv),
+            "--q-min",
+            "0.0",
+            "--q-max",
+            "30.0",
+            "--peak-window",
+            "21",
+        ]
+    )
+
+    assert rc == 0
+    lines = output_csv.read_text(encoding="utf-8").strip().splitlines()
+    assert lines[0] == "Q value,I(Q),Error I(Q)"
+    assert len(lines) > 10
