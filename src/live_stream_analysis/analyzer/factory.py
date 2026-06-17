@@ -48,6 +48,7 @@ class _AdaraRunner:
             tof_tick_us=args.tof_tick_us,
             plotter=plotter,
             live_plot_refresh_every=args.live_plot_refresh_every,
+            event_log_interval=args.event_log_interval,
         )
 
     def run_basic_mode(self, reader, *, chunk_size: int) -> int:
@@ -76,6 +77,7 @@ class _NexusRunner:
             tof_tick_us=args.tof_tick_us,
             plotter=plotter,
             live_plot_refresh_every=args.live_plot_refresh_every,
+            event_log_interval=args.event_log_interval,
             chunk_size=chunk_size,
         )
 

@@ -69,6 +69,7 @@ def test_accumulate_adara_histogram_uses_pixel_id_then_tof_tuple_order():
         tof_tick_us=1.0,
         plotter=NullHistogramPlotter(),
         live_plot_refresh_every=1,
+        event_log_interval=100_000,
     )
 
     assert packet_count == 1

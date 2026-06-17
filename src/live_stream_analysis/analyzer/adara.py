@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import math
 
 try:
@@ -13,6 +14,8 @@ except ImportError:  # pragma: no cover
 
 from .histogram import PixelQConversion, pixel_tof_to_q
 from .live_plot import HistogramPlotter, maybe_update_live_plot
+
+LOGGER = logging.getLogger(__name__)
 
 
 def build_reader(args: argparse.Namespace):
@@ -56,11 +59,14 @@ def accumulate_adara_histogram(
     tof_tick_us: float,
     plotter: HistogramPlotter,
     live_plot_refresh_every: int,
+    event_log_interval: int,
 ) -> tuple[int, int, int, list[int]]:
     packet_count = 0
     total_events = 0
     histogram_events = 0
     hist = [0] * histogram_bins
+    event_log_interval = max(1, event_log_interval)
+    next_event_log = event_log_interval
 
     for packet in reader.read_generator():
         packet_count += 1
@@ -75,6 +81,14 @@ def accumulate_adara_histogram(
             if 0 <= bram_index < histogram_bins:
                 hist[bram_index] += 1
                 histogram_events += 1
+                if histogram_events >= next_event_log:
+                    LOGGER.info(
+                        "Histogrammed %s events after %s packets (%s total source events)",
+                        histogram_events,
+                        packet_count,
+                        total_events,
+                    )
+                    next_event_log += event_log_interval
 
         maybe_update_live_plot(
             plotter,

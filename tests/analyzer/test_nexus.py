@@ -62,6 +62,7 @@ def test_accumulate_nexus_histogram_counts_events_into_expected_bin(tmp_path: Pa
         tof_tick_us=1.0,
         plotter=NullHistogramPlotter(),
         live_plot_refresh_every=1,
+        event_log_interval=100_000,
         chunk_size=2,
     )
 

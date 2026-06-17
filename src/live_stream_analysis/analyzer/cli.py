@@ -96,5 +96,17 @@ def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         default=1,
         help="Refresh the live plot every N ADARA packets or NeXus chunks (default: 1).",
     )
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
+        help="Logging level for analyze setup and progress messages (default: INFO).",
+    )
+    parser.add_argument(
+        "--event-log-interval",
+        type=int,
+        default=100_000,
+        help="Emit a progress log each time this many histogrammed events are accumulated (default: 100000).",
+    )
 
     return parser

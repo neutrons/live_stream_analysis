@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import logging
 import sys
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from .histogram import PixelQConversion, pixel_tof_to_q
 from .live_plot import HistogramPlotter, maybe_update_live_plot
 
 DEFAULT_NEXUS_CHUNK_SIZE = 250_000
+LOGGER = logging.getLogger(__name__)
 
 
 def count_nexus_chunks(nexus_files: list[str], chunk_size: int) -> int:
@@ -71,6 +73,7 @@ def accumulate_nexus_histogram(
     tof_tick_us: float,
     plotter: HistogramPlotter,
     live_plot_refresh_every: int,
+    event_log_interval: int,
     *,
     chunk_size: int = DEFAULT_NEXUS_CHUNK_SIZE,
 ) -> tuple[int, int, int, list[int]]:
@@ -80,6 +83,8 @@ def accumulate_nexus_histogram(
     hist = [0] * histogram_bins
     total_chunks = count_nexus_chunks(nexus_files, chunk_size)
     processed_chunks = 0
+    event_log_interval = max(1, event_log_interval)
+    next_event_log = event_log_interval
 
     for nexus_file in nexus_files:
         with h5py.File(nexus_file, "r") as handle:
@@ -96,6 +101,14 @@ def accumulate_nexus_histogram(
                         if 0 <= bram_index < histogram_bins:
                             hist[bram_index] += 1
                             histogram_events += 1
+                            if histogram_events >= next_event_log:
+                                LOGGER.info(
+                                    "Histogrammed %s events after %s NeXus chunks (%s total source events)",
+                                    histogram_events,
+                                    processed_chunks + 1,
+                                    total_events,
+                                )
+                                next_event_log += event_log_interval
 
                     processed_chunks += 1
                     print_nexus_progress(processed_chunks, total_chunks, nexus_file)
