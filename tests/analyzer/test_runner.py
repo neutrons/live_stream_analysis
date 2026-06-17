@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from live_stream_analysis.analyzer.runner import create_source_runner
+from live_stream_analysis.analyzer.factory import create_source_runner
 
 
 def test_create_source_runner_returns_nexus_runner_for_nexus_args():

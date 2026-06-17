@@ -9,8 +9,9 @@ import numpy as np
 import pytest
 from readadara import AdaraFileReader
 
-from live_stream_analysis.analyzer.adara import _compute_relative_uncertainty, _load_correction_csv
-from live_stream_analysis.analyzer.adara import build_reader as _build_reader
+from live_stream_analysis.analyzer.factory import build_reader as _build_reader
+from live_stream_analysis.analyzer.histogram import load_correction_csv
+from live_stream_analysis.analyzer.live_plot import compute_relative_uncertainty
 from live_stream_analysis.main import build_parser, main
 from tests.analyzer.adara_fixtures import event_packet, null_packet, rtdl_packet
 
@@ -82,7 +83,7 @@ class TestAnalyzeParser:
 
 class TestAnalyzerHelpers:
     def test_compute_relative_uncertainty_uses_absolute_ratio_and_zero_guard(self):
-        result = _compute_relative_uncertainty([2.0, -4.0, 0.0], [1.0, 2.0, 3.0])
+        result = compute_relative_uncertainty([2.0, -4.0, 0.0], [1.0, 2.0, 3.0])
 
         assert result == [0.5, 0.5, 0.0]
 
@@ -100,7 +101,7 @@ class TestAnalyzerHelpers:
             encoding="utf-8",
         )
 
-        values, errors = _load_correction_csv(str(correction_csv), expected_bins=3, q_bin_size=0.02, q_max=0.05)
+        values, errors = load_correction_csv(str(correction_csv), expected_bins=3, q_bin_size=0.02, q_max=0.05)
 
         assert values == [5.0, 7.0, 0.0]
         assert errors == [2.0, 3.0, 0.0]
@@ -419,7 +420,7 @@ class TestAdaraFileCLI:
                 updates.append((-1, -1))
 
         monkeypatch.setattr(
-            "live_stream_analysis.analyzer.adara._create_live_histogram_plotter",
+            "live_stream_analysis.analyzer.histogram_runner.create_live_histogram_plotter",
             lambda _args, _histogram_bins: _StubPlotter(),
         )
 
@@ -466,7 +467,7 @@ class TestAdaraFileCLI:
                 updates.append((-1.0, -1.0))
 
         monkeypatch.setattr(
-            "live_stream_analysis.analyzer.adara._create_live_histogram_plotter",
+            "live_stream_analysis.analyzer.histogram_runner.create_live_histogram_plotter",
             lambda _args, _histogram_bins: _StubPlotter(),
         )
 
@@ -537,7 +538,7 @@ class TestAdaraFileCLI:
                 return
 
         monkeypatch.setattr(
-            "live_stream_analysis.analyzer.adara._create_live_histogram_plotter",
+            "live_stream_analysis.analyzer.histogram_runner.create_live_histogram_plotter",
             lambda _args, _histogram_bins: _StubPlotter(),
         )
 
@@ -673,7 +674,7 @@ class TestNexusFileCLI:
             + "\n",
             encoding="utf-8",
         )
-        monkeypatch.setattr("live_stream_analysis.analyzer.adara.NEXUS_CHUNK_SIZE", 2)
+        monkeypatch.setattr("live_stream_analysis.analyzer.nexus.DEFAULT_NEXUS_CHUNK_SIZE", 2)
 
         rc = main(
             [

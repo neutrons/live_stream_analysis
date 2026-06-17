@@ -8,6 +8,8 @@ import h5py
 
 from .live_plot import HistogramPlotter, maybe_update_live_plot
 
+DEFAULT_NEXUS_CHUNK_SIZE = 250_000
+
 
 def count_nexus_chunks(nexus_files: list[str], chunk_size: int) -> int:
     if chunk_size <= 0:
@@ -68,7 +70,7 @@ def accumulate_nexus_histogram(
     plotter: HistogramPlotter,
     live_plot_refresh_every: int,
     *,
-    chunk_size: int = 250_000,
+    chunk_size: int = DEFAULT_NEXUS_CHUNK_SIZE,
 ) -> tuple[int, int, int, list[int]]:
     packet_count = 0
     total_events = 0
@@ -112,7 +114,7 @@ def accumulate_nexus_histogram(
     return packet_count, total_events, histogram_events, hist
 
 
-def run_basic_mode(nexus_files: list[str], *, chunk_size: int = 250_000) -> int:
+def run_basic_mode(nexus_files: list[str], *, chunk_size: int = DEFAULT_NEXUS_CHUNK_SIZE) -> int:
     packet_count = 0
     event_count = 0
     total_chunks = count_nexus_chunks(nexus_files, chunk_size)

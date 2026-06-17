@@ -22,7 +22,7 @@ class HistogramSourceRunner(Protocol):
         chunk_size: int,
     ): ...
 
-    def run_basic_mode(self, reader) -> int: ...
+    def run_basic_mode(self, reader, *, chunk_size: int) -> int: ...
 
 
 @dataclass(frozen=True)
@@ -35,8 +35,9 @@ class _AdaraRunner:
         histogram_bins: int,
         plotter,
         *,
-        _chunk_size: int,
+        chunk_size: int,
     ):
+        _ = chunk_size
         return accumulate_adara_histogram(
             reader=reader,
             q_matrix_constants=q_matrix_constants,
@@ -47,7 +48,8 @@ class _AdaraRunner:
             live_plot_refresh_every=args.live_plot_refresh_every,
         )
 
-    def run_basic_mode(self, reader) -> int:
+    def run_basic_mode(self, reader, *, chunk_size: int) -> int:
+        _ = chunk_size
         return run_adara_basic_mode(reader)
 
 
@@ -74,8 +76,8 @@ class _NexusRunner:
             chunk_size=chunk_size,
         )
 
-    def run_basic_mode(self, reader) -> int:
-        return run_nexus_basic_mode(reader)
+    def run_basic_mode(self, reader, *, chunk_size: int) -> int:
+        return run_nexus_basic_mode(reader, chunk_size=chunk_size)
 
 
 def create_source_runner(args: argparse.Namespace) -> HistogramSourceRunner:

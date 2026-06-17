@@ -1,8 +1,51 @@
 from pathlib import Path
 
+import h5py
+import numpy as np
+
 from live_stream_analysis.main import main
 from live_stream_analysis.preparer.converter import write_pixel_geometry_csv
 from live_stream_analysis.preparer.instrument import build_detector_geometry
+
+
+def _minimal_idf() -> str:
+    return """<?xml version='1.0' encoding='UTF-8'?>
+<instrument name='TEST' xmlns='http://www.mantidproject.org/IDF/1.0'>
+    <component type='moderator'>
+        <location z='-1.0' />
+    </component>
+    <type name='moderator' is='Source' />
+    <component type='sample-position'>
+        <location />
+    </component>
+    <type name='sample-position' is='SamplePos' />
+    <idlist idname='bank1_ids'>
+        <id val='1' />
+    </idlist>
+    <component type='bank1' idlist='bank1_ids'>
+        <location x='1.0' y='0.0' z='0.0' />
+    </component>
+    <type name='bank1'>
+        <component type='pixel'>
+            <location />
+        </component>
+    </type>
+    <type name='pixel' is='detector' />
+</instrument>
+"""
+
+
+def _write_nexus(tmp_path: Path, name: str, event_ids: list[int], event_tofs: list[float]) -> Path:
+    path = tmp_path / name
+    with h5py.File(path, "w") as handle:
+        entry = handle.create_group("entry")
+        instrument = entry.create_group("instrument")
+        instrument_xml = instrument.create_group("instrument_xml")
+        instrument_xml.create_dataset("data", data=np.array([_minimal_idf().encode("utf-8")]))
+        events = entry.create_group("bank1_events")
+        events.create_dataset("event_id", data=np.array(event_ids, dtype=np.int32))
+        events.create_dataset("event_time_offset", data=np.array(event_tofs, dtype=np.float64))
+    return path
 
 
 def test_preparer_cli_writes_csv_outputs(tmp_path: Path) -> None:
@@ -89,7 +132,7 @@ def test_preparer_q_matrix_scale_option(tmp_path: Path) -> None:
 
 
 def test_preparer_background_reduction_mode_writes_three_column_csv(tmp_path: Path) -> None:
-    nexus_path = Path(__file__).parents[2] / "nexus_files" / "mt_pac_can" / "NOM_243710.nxs.h5"
+    nexus_path = _write_nexus(tmp_path, "background.nxs.h5", [1, 1, 1], [1.0, 1.0, 1.0])
     output_csv = tmp_path / "background.csv"
 
     rc = main(
@@ -115,7 +158,8 @@ def test_preparer_background_reduction_mode_writes_three_column_csv(tmp_path: Pa
 
 
 def test_preparer_normalization_reduction_mode_accepts_multiple_files(tmp_path: Path) -> None:
-    base = Path(__file__).parents[2] / "nexus_files"
+    nexus_a = _write_nexus(tmp_path, "norm_a.nxs.h5", [1, 1], [1.0, 1.0])
+    nexus_b = _write_nexus(tmp_path, "norm_b.nxs.h5", [1], [1.0])
     output_csv = tmp_path / "normalization.csv"
 
     rc = main(
@@ -124,7 +168,9 @@ def test_preparer_normalization_reduction_mode_accepts_multiple_files(tmp_path: 
             "--mode",
             "normalization",
             "--nexus-file",
-            str(base / "vanadium" / "NOM_243712.nxs.h5"),
+            str(nexus_a),
+            "--nexus-file",
+            str(nexus_b),
             "--reduction-output-csv",
             str(output_csv),
             "--q-min",
