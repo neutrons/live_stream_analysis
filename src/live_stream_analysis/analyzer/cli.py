@@ -143,6 +143,11 @@ def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         help="Do not automatically open the browser when using browser live plot mode.",
     )
     parser.add_argument(
+        "--live-plot-keep-open",
+        action="store_true",
+        help="Keep the browser live plot server running after processing completes until interrupted.",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         help="Logging level for analyzer setup and progress messages (default: INFO).",

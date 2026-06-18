@@ -2,15 +2,13 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app/src:/app
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-COPY pyproject.toml README.md ./
-COPY src ./src
-COPY tests ./tests
+COPY pyproject.toml uv.lock README.md /app/
+COPY src /app/src
 
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir ".[intersect]" pytest pytest-cov pytest-xdist pytest-repeat
+RUN uv sync --frozen --group intersect --extra intersect
 
-CMD ["pytest"]
+ENV PATH="/app/.venv/bin:$PATH"
+
+CMD ["live_stream_analysis", "--help"]

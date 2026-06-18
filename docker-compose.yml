@@ -37,6 +37,7 @@ services:
       - --live-plot-port
       - "8000"
       - --live-plot-no-open-browser
+      - --live-plot-keep-open
       - --live-plot-refresh-every
       - "1000"
       - --log-level
@@ -84,6 +85,7 @@ services:
       - --live-plot-port
       - "8001"
       - --live-plot-no-open-browser
+      - --live-plot-keep-open
       - --live-plot-refresh-every
       - "1"
       - --log-level

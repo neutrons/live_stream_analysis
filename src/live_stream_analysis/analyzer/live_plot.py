@@ -18,6 +18,8 @@ import matplotlib.pyplot as plt
 class HistogramPlotter(Protocol):
     def update(self, intensity: list[float], error: list[float], relative_uncertainty: list[float]) -> None: ...
 
+    def wait_until_closed(self) -> None: ...
+
     def close(self) -> None: ...
 
 
@@ -128,6 +130,9 @@ class BrowserHistogramPlotter:
     def update(self, intensity: list[float], error: list[float], relative_uncertainty: list[float]) -> None:
         self._state.update(intensity, error, relative_uncertainty)
 
+    def wait_until_closed(self) -> None:
+        self._thread.join()
+
     def close(self) -> None:
         self._state.close()
         self._server.shutdown()
@@ -180,12 +185,18 @@ class LiveHistogramPlotter:
         self._figure.canvas.flush_events()
         plt.pause(0.001)
 
+    def wait_until_closed(self) -> None:
+        plt.show()
+
     def close(self) -> None:
         plt.ioff()
 
 
 class NullHistogramPlotter:
     def update(self, _intensity: list[float], _error: list[float], _relative_uncertainty: list[float]) -> None:
+        return
+
+    def wait_until_closed(self) -> None:
         return
 
     def close(self) -> None:

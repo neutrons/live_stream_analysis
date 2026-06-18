@@ -24,6 +24,10 @@ from .live_plot import HistogramPlotter, create_live_histogram_plotter, maybe_up
 LOGGER = logging.getLogger(__name__)
 
 
+def _should_keep_live_plot_open(args: argparse.Namespace) -> bool:
+    return bool(getattr(args, "live_plot_mode", None) == "browser" and getattr(args, "live_plot_keep_open", False))
+
+
 def _configure_logging(args: argparse.Namespace) -> None:
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper(), logging.INFO),
@@ -114,6 +118,9 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             force=True,
         )
         LOGGER.info("Final histogram update complete")
+        if plotter is not None and _should_keep_live_plot_open(args):
+            LOGGER.info("Keeping browser live plot available at %s until interrupted", getattr(plotter, "url", "configured host/port"))
+            plotter.wait_until_closed()
         if publisher is not None and intersect_config is not None:
             q_values = [args.histogram_q_min + (index * args.histogram_q_bin_size) for index in range(len(corrected_hist))]
             publisher.publish_event(
