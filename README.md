@@ -85,6 +85,45 @@ uv run live_stream_analysis analyze \
     --histogram-output-csv sample_histogram.csv
 ```
 
+For a full local example with background subtraction, normalization, live plotting,
+and progress logging enabled:
+
+```bash
+uv run live_stream_analysis analyze \
+    --adara-file adara_mount/20250201/adara_streams/NOMAD.Raw.Data.Runs.208511-208543/20250131-101613.350178410-run-208511/m00000001-f00000001-run-208511.adara \
+    --histogram-pixel-geometry-csv pixel_geometry.csv \
+    --histogram-q-bin-size 0.02 \
+    --histogram-q-max 30 \
+    --tof-tick-us 1.0 \
+    --background-subtraction background.csv \
+    --normalization normalization.csv \
+    --histogram-output-csv analyze_histogram.csv \
+    --live-plot \
+    --live-plot-refresh-every 1000 \
+    --log-level INFO \
+    --event-log-interval 100000
+```
+
+The equivalent Docker invocation from the repository root is:
+
+```bash
+docker build -t live-stream-analysis .
+docker run --rm -v "$PWD":/work -w /work live-stream-analysis \
+    live_stream_analysis analyze \
+    --adara-file adara_mount/20250201/adara_streams/NOMAD.Raw.Data.Runs.208511-208543/20250131-101613.350178410-run-208511/m00000001-f00000001-run-208511.adara \
+    --histogram-pixel-geometry-csv pixel_geometry.csv \
+    --histogram-q-bin-size 0.02 \
+    --histogram-q-max 30 \
+    --tof-tick-us 1.0 \
+    --background-subtraction background.csv \
+    --normalization normalization.csv \
+    --histogram-output-csv analyze_histogram.csv \
+    --live-plot \
+    --live-plot-refresh-every 1000 \
+    --log-level INFO \
+    --event-log-interval 100000
+```
+
 The same `analyze` command also accepts event NeXus sample inputs. Repeat
 `--nexus-file` to combine multiple sample runs while keeping the same histogram,
 background-subtraction, normalization, and CSV output path:

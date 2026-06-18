@@ -503,7 +503,8 @@ class TestAdaraFileCLI:
         updates: list[tuple[int, int]] = []
 
         class _StubPlotter:
-            def update(self, intensity, error, _relative_uncertainty):
+            def update(self, intensity, error, _relative_uncertainty, *, force=False):
+                _ = force
                 updates.append((len(intensity), int(round(max(error)))))
 
             def close(self):
@@ -550,7 +551,8 @@ class TestAdaraFileCLI:
         updates: list[tuple[float, float]] = []
 
         class _StubPlotter:
-            def update(self, intensity, _error, relative_uncertainty):
+            def update(self, intensity, _error, relative_uncertainty, *, force=False):
+                _ = force
                 updates.append((max(intensity), max(relative_uncertainty)))
 
             def close(self):
@@ -621,7 +623,8 @@ class TestAdaraFileCLI:
         relative_uncertainty_updates: list[float] = []
 
         class _StubPlotter:
-            def update(self, _intensity, _error, relative_uncertainty):
+            def update(self, _intensity, _error, relative_uncertainty, *, force=False):
+                _ = force
                 relative_uncertainty_updates.append(max(relative_uncertainty))
 
             def close(self):
