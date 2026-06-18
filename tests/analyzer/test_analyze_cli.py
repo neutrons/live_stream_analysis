@@ -11,7 +11,7 @@ from readadara import AdaraFileReader
 
 from live_stream_analysis.analyzer.factory import build_reader as _build_reader
 from live_stream_analysis.analyzer.histogram import load_correction_csv
-from live_stream_analysis.analyzer.live_plot import compute_relative_uncertainty
+from live_stream_analysis.analyzer.live_plot import BrowserHistogramPlotter, compute_relative_uncertainty
 from live_stream_analysis.main import build_parser, main
 from tests.analyzer.adara_fixtures import event_packet, null_packet, rtdl_packet
 
@@ -503,8 +503,7 @@ class TestAdaraFileCLI:
         updates: list[tuple[int, int]] = []
 
         class _StubPlotter:
-            def update(self, intensity, error, _relative_uncertainty, *, force=False):
-                _ = force
+            def update(self, intensity, error, _relative_uncertainty):
                 updates.append((len(intensity), int(round(max(error)))))
 
             def close(self):
@@ -526,7 +525,8 @@ class TestAdaraFileCLI:
                 "100",
                 "--histogram-q-bin-size",
                 "0.02",
-                "--live-plot",
+                "--live-plot-mode",
+                "desktop",
             ]
         )
 
@@ -551,8 +551,7 @@ class TestAdaraFileCLI:
         updates: list[tuple[float, float]] = []
 
         class _StubPlotter:
-            def update(self, intensity, _error, relative_uncertainty, *, force=False):
-                _ = force
+            def update(self, intensity, _error, relative_uncertainty):
                 updates.append((max(intensity), max(relative_uncertainty)))
 
             def close(self):
@@ -574,7 +573,8 @@ class TestAdaraFileCLI:
                 "100",
                 "--histogram-q-bin-size",
                 "0.02",
-                "--live-plot",
+                "--live-plot-mode",
+                "desktop",
                 "--live-plot-refresh-every",
                 "2",
             ]
@@ -623,8 +623,7 @@ class TestAdaraFileCLI:
         relative_uncertainty_updates: list[float] = []
 
         class _StubPlotter:
-            def update(self, _intensity, _error, relative_uncertainty, *, force=False):
-                _ = force
+            def update(self, _intensity, _error, relative_uncertainty):
                 relative_uncertainty_updates.append(max(relative_uncertainty))
 
             def close(self):
@@ -650,12 +649,69 @@ class TestAdaraFileCLI:
                 str(background_csv),
                 "--normalization",
                 str(normalization_csv),
-                "--live-plot",
+                "--live-plot-mode",
+                "desktop",
             ]
         )
 
         assert rc == 0
         assert relative_uncertainty_updates[-1] == pytest.approx(1.41421356)
+
+    def test_histogram_mode_browser_live_plot_uses_browser_plotter(self, tmp_path: Path, monkeypatch):
+        path = _write_adara(tmp_path, event_packet([(1, 1)]))
+        pixel_csv = tmp_path / "pixel_geometry.csv"
+        pixel_csv.write_text(
+            "\n".join(
+                [
+                    "pixel id,L2 value,theta value,TOF-to-Q matrix element",
+                    "0,1.0,1.0,0.0",
+                    "1,1.0,1.0,99.0",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        created: list[tuple[str, int, bool]] = []
+
+        class _StubBrowserPlotter:
+            def __init__(self, q_bin_size: float, histogram_bins: int, host: str, port: int, open_browser: bool):
+                _ = (q_bin_size, histogram_bins)
+                created.append((host, port, open_browser))
+
+            def update(self, _intensity, _error, _relative_uncertainty):
+                return
+
+            def close(self):
+                return
+
+        monkeypatch.setattr(
+            "live_stream_analysis.analyzer.live_plot.BrowserHistogramPlotter",
+            _StubBrowserPlotter,
+        )
+
+        rc = main(
+            [
+                "analyze",
+                "--adara-file",
+                str(path),
+                "--histogram-pixel-geometry-csv",
+                str(pixel_csv),
+                "--histogram-q-max",
+                "100",
+                "--histogram-q-bin-size",
+                "0.02",
+                "--live-plot-mode",
+                "browser",
+                "--live-plot-host",
+                "0.0.0.0",
+                "--live-plot-port",
+                "8123",
+                "--live-plot-no-open-browser",
+            ]
+        )
+
+        assert rc == 0
+        assert created == [("0.0.0.0", 8123, False)]
 
 
 class TestNexusFileCLI:

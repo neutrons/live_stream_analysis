@@ -45,7 +45,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             LOGGER.info("Normalization enabled: %s", Path(args.normalization).resolve())
         if args.histogram_output_csv is not None:
             LOGGER.info("Histogram CSV output will be written to %s", Path(args.histogram_output_csv).resolve())
-        LOGGER.info("Live plot %s", "enabled" if args.live_plot else "disabled")
+        LOGGER.info("Live plot mode: %s", args.live_plot_mode or "disabled")
         LOGGER.info("Event progress log interval set to %s histogrammed events", args.event_log_interval)
         plotter = create_live_histogram_plotter(args, histogram_bins)
         runner = create_source_runner(args)

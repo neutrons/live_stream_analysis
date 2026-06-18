@@ -86,9 +86,12 @@ def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         help="Optional three-column CSV with Q value, I(Q), Error I(Q) used to normalize the histogrammed signal.",
     )
     parser.add_argument(
-        "--live-plot",
-        action="store_true",
-        help="Show a live-updating Q vs I(Q) plot with shaded error bars while histogramming.",
+        "--live-plot-mode",
+        choices=("desktop", "browser"),
+        help=(
+            "Show a live-updating histogram while processing. "
+            "Use 'desktop' for an interactive matplotlib window or 'browser' for a local web UI."
+        ),
     )
     parser.add_argument(
         "--live-plot-refresh-every",
@@ -97,16 +100,31 @@ def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         help="Refresh the live plot every N ADARA packets or NeXus chunks (default: 1).",
     )
     parser.add_argument(
+        "--live-plot-host",
+        default="127.0.0.1",
+        help="Host interface for browser live plot mode (default: 127.0.0.1).",
+    )
+    parser.add_argument(
+        "--live-plot-port",
+        type=int,
+        default=8000,
+        help="Port for browser live plot mode (default: 8000).",
+    )
+    parser.add_argument(
+        "--live-plot-no-open-browser",
+        action="store_true",
+        help="Do not automatically open the browser when using browser live plot mode.",
+    )
+    parser.add_argument(
         "--log-level",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         default="INFO",
-        help="Logging level for analyze setup and progress messages (default: INFO).",
+        help="Logging level for analyzer setup and progress messages (default: INFO).",
     )
     parser.add_argument(
         "--event-log-interval",
         type=int,
         default=100_000,
-        help="Emit a progress log each time this many histogrammed events are accumulated (default: 100000).",
+        help="Log histogramming progress every N accepted events (default: 100000).",
     )
 
     return parser

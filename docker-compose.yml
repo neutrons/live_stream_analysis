@@ -1,0 +1,138 @@
+services:
+  analyze-browser-live-plot:
+    profiles:
+      - adara-file
+    build:
+      context: .
+    working_dir: /work
+    volumes:
+      - .:/work
+    ports:
+      - "8000:8000"
+    command:
+      - live_stream_analysis
+      - analyze
+      - --adara-file
+      - adara_mount/20250201/adara_streams/NOMAD.Raw.Data.Runs.208511-208543/20250131-101613.350178410-run-208511/m00000001-f00000001-run-208511.adara
+      - --histogram-pixel-geometry-csv
+      - pixel_geometry.csv
+      - --histogram-q-bin-size
+      - "0.02"
+      - --histogram-q-min
+      - "0.5"
+      - --histogram-q-max
+      - "30"
+      - --tof-tick-us
+      - "1.0"
+      - --background-subtraction
+      - background.csv
+      - --normalization
+      - normalization.csv
+      - --histogram-output-csv
+      - analyze_histogram.csv
+      - --live-plot-mode
+      - browser
+      - --live-plot-host
+      - 0.0.0.0
+      - --live-plot-port
+      - "8000"
+      - --live-plot-no-open-browser
+      - --live-plot-refresh-every
+      - "1000"
+      - --log-level
+      - INFO
+      - --event-log-interval
+      - "100000"
+
+  analyze-browser-live-plot-nexus:
+    profiles:
+      - nexus
+    build:
+      context: .
+    working_dir: /work
+    volumes:
+      - .:/work
+    ports:
+      - "8001:8001"
+    command:
+      - live_stream_analysis
+      - analyze
+      - --nexus-file
+      - nexus_files/diamond/NOM_243708.nxs.h5
+      - --nexus-file
+      - nexus_files/diamond/NOM_243709.nxs.h5
+      - --histogram-pixel-geometry-csv
+      - pixel_geometry.csv
+      - --histogram-q-bin-size
+      - "0.02"
+      - --histogram-q-min
+      - "0.5"
+      - --histogram-q-max
+      - "30"
+      - --tof-tick-us
+      - "1.0"
+      - --background-subtraction
+      - background.csv
+      - --normalization
+      - normalization.csv
+      - --histogram-output-csv
+      - analyze_histogram_nexus.csv
+      - --live-plot-mode
+      - browser
+      - --live-plot-host
+      - 0.0.0.0
+      - --live-plot-port
+      - "8001"
+      - --live-plot-no-open-browser
+      - --live-plot-refresh-every
+      - "1"
+      - --log-level
+      - INFO
+      - --event-log-interval
+      - "100000"
+
+  analyze-browser-live-plot-stream:
+    profiles:
+      - adara-stream
+    build:
+      context: .
+    working_dir: /work
+    volumes:
+      - .:/work
+    ports:
+      - "8002:8002"
+    command:
+      - live_stream_analysis
+      - analyze
+      - --adara-stream
+      - bl1b-daq1.sns.gov
+      - "31415"
+      - --histogram-pixel-geometry-csv
+      - pixel_geometry.csv
+      - --histogram-q-bin-size
+      - "0.02"
+      - --histogram-q-min
+      - "0.5"
+      - --histogram-q-max
+      - "30"
+      - --tof-tick-us
+      - "1.0"
+      - --background-subtraction
+      - background.csv
+      - --normalization
+      - normalization.csv
+      - --histogram-output-csv
+      - analyze_histogram_stream.csv
+      - --live-plot-mode
+      - browser
+      - --live-plot-host
+      - 0.0.0.0
+      - --live-plot-port
+      - "8002"
+      - --live-plot-no-open-browser
+      - --live-plot-refresh-every
+      - "1000"
+      - --log-level
+      - INFO
+      - --event-log-interval
+      - "100000"

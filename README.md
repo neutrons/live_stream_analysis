@@ -98,17 +98,18 @@ uv run live_stream_analysis analyze \
     --background-subtraction background.csv \
     --normalization normalization.csv \
     --histogram-output-csv analyze_histogram.csv \
-    --live-plot \
+
+    --live-plot-mode desktop \
     --live-plot-refresh-every 1000 \
     --log-level INFO \
     --event-log-interval 100000
 ```
 
-The equivalent Docker invocation from the repository root is:
+For Docker, use browser live plot mode instead of desktop mode so the plot is visible from the host browser:
 
 ```bash
 docker build -t live-stream-analysis .
-docker run --rm -v "$PWD":/work -w /work live-stream-analysis \
+docker run --rm -p 8000:8000 -v "$PWD":/work -w /work live-stream-analysis \
     live_stream_analysis analyze \
     --adara-file adara_mount/20250201/adara_streams/NOMAD.Raw.Data.Runs.208511-208543/20250131-101613.350178410-run-208511/m00000001-f00000001-run-208511.adara \
     --histogram-pixel-geometry-csv pixel_geometry.csv \
@@ -118,11 +119,28 @@ docker run --rm -v "$PWD":/work -w /work live-stream-analysis \
     --background-subtraction background.csv \
     --normalization normalization.csv \
     --histogram-output-csv analyze_histogram.csv \
-    --live-plot \
+    --live-plot-mode browser \
+    --live-plot-host 0.0.0.0 \
+    --live-plot-port 8000 \
+    --live-plot-no-open-browser \
     --live-plot-refresh-every 1000 \
     --log-level INFO \
     --event-log-interval 100000
 ```
+
+Then open `http://localhost:8000` in your browser.
+
+If you prefer Docker Compose, the repository includes [docker-compose.yml](/home/ntm/projects/illumine/live_stream_analysis/docker-compose.yml):
+
+```bash
+docker compose --profile adara-file up --build
+```
+
+That starts the ADARA file browser live-plot workflow and publishes it on `http://localhost:8000`.
+Because the compose file now uses profiles, `docker compose up` by itself will not start any of the three analysis services.
+
+The browser page now includes a small status panel with live plot update count, total counts,
+nonzero bins, peak intensity, and mean relative uncertainty so you can see progress at a glance.
 
 The same `analyze` command also accepts event NeXus sample inputs. Repeat
 `--nexus-file` to combine multiple sample runs while keeping the same histogram,
@@ -141,6 +159,29 @@ uv run live_stream_analysis analyze \
     --normalization normalization.csv \
     --histogram-output-csv analyze_histogram.csv
 ```
+
+For a browser live-plot version of the same two-file NeXus workflow in Docker Compose:
+
+```bash
+docker compose --profile nexus up --build
+```
+
+That publishes the NeXus browser plot on `http://localhost:8001`.
+
+For a browser live-plot workflow against the default NOMAD live ADARA stream endpoint:
+
+```bash
+docker compose --profile adara-stream up --build
+```
+
+That service defaults to `--adara-stream bl1b-daq1.sns.gov 31415` and publishes the browser plot on `http://localhost:8002`.
+It requires DNS/network access to the SNS endpoint, so use the SNS network or VPN when running it.
+
+Available profiles are:
+
+1. `adara-file` for the mounted ADARA file example on port `8000`
+2. `nexus` for the two-file NeXus example on port `8001`
+3. `adara-stream` for the live NOMAD stream example on port `8002`
 
 To run the same analysis inside Docker, mount the directory that contains your
 ADARA file, pixel geometry CSV, and desired output path into the container.
