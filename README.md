@@ -184,10 +184,10 @@ The analyzer can publish INTERSECT events over RabbitMQ/AMQP for two cases:
 1. Periodic histogram snapshots containing `q`, `intensity`, and `error`
 2. A run-complete event containing `instrument`, `ipts` when available, and `run_number`
 
-Install the optional INTERSECT dependencies with:
+Install the project dependencies with:
 
 ```bash
-uv sync --group intersect
+uv sync
 ```
 
 The example configuration is in [configs/intersect.example.yaml](/home/ntm/projects/illumine/live_stream_analysis/configs/intersect.example.yaml). The default publish interval is 5 seconds.
@@ -195,7 +195,7 @@ The example configuration is in [configs/intersect.example.yaml](/home/ntm/proje
 To enable publishing during analysis:
 
 ```bash
-uv run --group intersect live_stream_analysis analyze \
+uv run live_stream_analysis analyze \
     --adara-file /path/to/file.adara \
     --histogram-pixel-geometry-csv pixel_geometry.csv \
     --histogram-q-min 0.6 \
@@ -209,7 +209,7 @@ uv run --group intersect live_stream_analysis analyze \
 To run the one-off listener client that subscribes to both INTERSECT events:
 
 ```bash
-uv run --group intersect live_stream_analysis intersect-listen \
+uv run live_stream_analysis intersect-listen \
     --intersect-config configs/intersect.example.yaml
 ```
 

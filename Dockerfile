@@ -7,7 +7,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 COPY pyproject.toml uv.lock README.md /app/
 COPY src /app/src
 
-RUN uv sync --frozen --group intersect --extra intersect
+RUN uv sync --frozen
 
 ENV PATH="/app/.venv/bin:$PATH"
 

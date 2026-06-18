@@ -8,15 +8,17 @@ keywords = ["neutrons", "python"]
 readme = "README.md"
 dependencies = [
   "h5py>=3.16.0",
+  "intersect-sdk",
   # Dependencies available from both PyPI and conda should be listed here
   "matplotlib>=3.10.9",
   "numpy>=2.2.6,<3",
+  "pydantic>=2",
+  "pyyaml>=6",
   "readadara>=0.0.1",
 ]
 
 [project.optional-dependencies]
 docs = ["sphinx", "sphinx_rtd_theme", "myst-parser"]
-intersect = ["intersect-sdk", "pydantic>=2", "pyyaml>=6"]
 
 [project.scripts]
 live-stream-analysis-cli = "live_stream_analysis.main:main"
@@ -48,7 +50,6 @@ dev = ["pip-audit", "pre-commit", "ruff"]
 docs = ["myst-parser", "sphinx", "sphinx_rtd_theme"]
 package = ["build", "twine"]
 jupyter = ["ipympl", "ipywidgets", "jupyterlab"]
-intersect = ["intersect-sdk", "pydantic>=2", "pyyaml>=6"]
 
 [tool.uv]
 default-groups = ["dev", "test"]

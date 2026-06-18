@@ -1780,10 +1780,13 @@ version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "h5py" },
+    { name = "intersect-sdk" },
     { name = "matplotlib", version = "3.10.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "matplotlib", version = "3.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
     { name = "readadara" },
 ]
 
@@ -1795,11 +1798,6 @@ docs = [
     { name = "sphinx", version = "9.0.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "sphinx", version = "9.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "sphinx-rtd-theme" },
-]
-intersect = [
-    { name = "intersect-sdk" },
-    { name = "pydantic" },
-    { name = "pyyaml" },
 ]
 
 [package.dev-dependencies]
@@ -1815,11 +1813,6 @@ docs = [
     { name = "sphinx", version = "9.0.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "sphinx", version = "9.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "sphinx-rtd-theme" },
-]
-intersect = [
-    { name = "intersect-sdk" },
-    { name = "pydantic" },
-    { name = "pyyaml" },
 ]
 jupyter = [
     { name = "ipympl" },
@@ -1840,17 +1833,17 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "h5py", specifier = ">=3.16.0" },
-    { name = "intersect-sdk", marker = "extra == 'intersect'" },
+    { name = "intersect-sdk" },
     { name = "matplotlib", specifier = ">=3.10.9" },
     { name = "myst-parser", marker = "extra == 'docs'" },
     { name = "numpy", specifier = ">=2.2.6,<3" },
-    { name = "pydantic", marker = "extra == 'intersect'", specifier = ">=2" },
-    { name = "pyyaml", marker = "extra == 'intersect'", specifier = ">=6" },
+    { name = "pydantic", specifier = ">=2" },
+    { name = "pyyaml", specifier = ">=6" },
     { name = "readadara", specifier = ">=0.0.1" },
     { name = "sphinx", marker = "extra == 'docs'" },
     { name = "sphinx-rtd-theme", marker = "extra == 'docs'" },
 ]
-provides-extras = ["docs", "intersect"]
+provides-extras = ["docs"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1862,11 +1855,6 @@ docs = [
     { name = "myst-parser" },
     { name = "sphinx" },
     { name = "sphinx-rtd-theme" },
-]
-intersect = [
-    { name = "intersect-sdk" },
-    { name = "pydantic", specifier = ">=2" },
-    { name = "pyyaml", specifier = ">=6" },
 ]
 jupyter = [
     { name = "ipympl" },
