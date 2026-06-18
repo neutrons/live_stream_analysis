@@ -21,6 +21,7 @@ class HistogramSourceRunner(Protocol):
         plotter,
         *,
         chunk_size: int,
+        histogram_callback=None,
     ): ...
 
     def run_basic_mode(self, reader, *, chunk_size: int) -> int: ...
@@ -37,6 +38,7 @@ class _AdaraRunner:
         plotter,
         *,
         chunk_size: int,
+        histogram_callback=None,
     ):
         _ = chunk_size
         return accumulate_adara_histogram(
@@ -49,6 +51,7 @@ class _AdaraRunner:
             plotter=plotter,
             live_plot_refresh_every=args.live_plot_refresh_every,
             event_log_interval=args.event_log_interval,
+            histogram_callback=histogram_callback,
         )
 
     def run_basic_mode(self, reader, *, chunk_size: int) -> int:
@@ -67,6 +70,7 @@ class _NexusRunner:
         plotter,
         *,
         chunk_size: int,
+        histogram_callback=None,
     ):
         return accumulate_nexus_histogram(
             nexus_files=reader,
@@ -79,6 +83,7 @@ class _NexusRunner:
             live_plot_refresh_every=args.live_plot_refresh_every,
             event_log_interval=args.event_log_interval,
             chunk_size=chunk_size,
+            histogram_callback=histogram_callback,
         )
 
     def run_basic_mode(self, reader, *, chunk_size: int) -> int:

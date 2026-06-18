@@ -3,6 +3,7 @@
 import argparse
 
 from live_stream_analysis import analyzer, preparer
+from live_stream_analysis.intersect import run_event_listener
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -15,6 +16,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     preparer.add_parser(subparsers)
     analyzer.add_parser(subparsers)
+    analyzer.add_intersect_listener_parser(subparsers)
 
     return parser
 
@@ -24,11 +26,19 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    if getattr(args, "_cmd", None) == "analyze" and getattr(args, "enable_intersect", False) and not getattr(
+        args, "intersect_config", None
+    ):
+        parser.error("--enable-intersect requires --intersect-config")
+
     if getattr(args, "_cmd", None) == "preparer":
         return preparer.run_from_namespace(args)
 
     if getattr(args, "_cmd", None) == "analyze":
         return analyzer.run_from_namespace(args)
+
+    if getattr(args, "_cmd", None) == "intersect-listen":
+        return run_event_listener(args.intersect_config)
 
     parser.print_help()
     return 1

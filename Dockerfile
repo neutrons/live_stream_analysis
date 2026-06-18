@@ -11,6 +11,6 @@ COPY src ./src
 COPY tests ./tests
 
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir . pytest pytest-cov pytest-xdist pytest-repeat
+    && pip install --no-cache-dir ".[intersect]" pytest pytest-cov pytest-xdist pytest-repeat
 
 CMD ["pytest"]

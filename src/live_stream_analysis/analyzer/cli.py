@@ -3,6 +3,23 @@ from __future__ import annotations
 import argparse
 
 
+def add_intersect_listener_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the 'intersect-listen' subcommand and return its parser."""
+    parser = subparsers.add_parser(
+        "intersect-listen",
+        help="Subscribe to INTERSECT events emitted by the analyzer service.",
+        description="Listen for histogram and run-complete INTERSECT events using the configured broker.",
+    )
+    parser.set_defaults(_cmd="intersect-listen")
+    parser.add_argument(
+        "--intersect-config",
+        metavar="FILE",
+        required=True,
+        help="YAML config file containing INTERSECT broker, data store, and hierarchy settings.",
+    )
+    return parser
+
+
 def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
     """Register the 'analyze' subcommand and return its parser."""
     parser = subparsers.add_parser(
@@ -35,6 +52,16 @@ def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         help="Hostname and port of a live ADARA stream (e.g. bl10-daq1 31415).",
     )
 
+    parser.add_argument(
+        "--enable-intersect",
+        action="store_true",
+        help="Enable INTERSECT event publishing for histogram updates and run completion.",
+    )
+    parser.add_argument(
+        "--intersect-config",
+        metavar="FILE",
+        help="YAML config file containing INTERSECT broker, data store, and event settings.",
+    )
     parser.add_argument(
         "--histogram-pixel-geometry-csv",
         metavar="FILE",

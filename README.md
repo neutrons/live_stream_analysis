@@ -177,6 +177,50 @@ docker compose --profile adara-stream up --build
 That service defaults to `--adara-stream bl1b-daq1.sns.gov 31415` and publishes the browser plot on `http://localhost:8002`.
 It requires DNS/network access to the SNS endpoint, so use the SNS network or VPN when running it.
 
+## INTERSECT Mode
+
+The analyzer can publish INTERSECT events over RabbitMQ/AMQP for two cases:
+
+1. Periodic histogram snapshots containing `q`, `intensity`, and `error`
+2. A run-complete event containing `instrument`, `ipts` when available, and `run_number`
+
+Install the optional INTERSECT dependencies with:
+
+```bash
+uv sync --group intersect
+```
+
+The example configuration is in [configs/intersect.example.yaml](/home/ntm/projects/illumine/live_stream_analysis/configs/intersect.example.yaml). The default publish interval is 5 seconds.
+
+To enable publishing during analysis:
+
+```bash
+uv run --group intersect live_stream_analysis analyze \
+    --adara-file /path/to/file.adara \
+    --histogram-pixel-geometry-csv pixel_geometry.csv \
+    --histogram-q-min 0.6 \
+    --histogram-q-bin-size 0.02 \
+    --histogram-q-max 30 \
+    --tof-tick-us 1.0 \
+    --enable-intersect \
+    --intersect-config configs/intersect.example.yaml
+```
+
+To run the one-off listener client that subscribes to both INTERSECT events:
+
+```bash
+uv run --group intersect live_stream_analysis intersect-listen \
+    --intersect-config configs/intersect.example.yaml
+```
+
+For a local RabbitMQ + MinIO + analyzer + listener stack:
+
+```bash
+docker compose -f docker-compose.intersect.yml --profile intersect --profile adara-file --profile listener up --build
+```
+
+RabbitMQ management is exposed on `http://localhost:15672` and MinIO console on `http://localhost:9001`.
+
 Available profiles are:
 
 1. `adara-file` for the mounted ADARA file example on port `8000`
@@ -325,64 +369,6 @@ reader = AdaraFileReader(filename)
 for packet in reader.read_generator()
     print(packet.to_dict())
 ```
-
-## Repository Adjustments
-
-### Optional: Add an access token to Anaconda
-
-If you plan to upload conda artifacts to [anaconda.org/neutrons](https://anaconda.org/neutrons),
-an administrator of `anaconda.org/neutrons` must create an access token for your repository in the [access settings](https://anaconda.org/neutrons/settings/access).
-
-After created, the token must be stored in a `repository secret`:
-
-1. Navigate to the main page of the repository on GitHub.com.
-1. Click on the "Settings" tab.
-1. In the left sidebar, navigate to the "Security" section and select "Secrets and variables" followed by "Actions".
-1. Click on the "New repository secret" button.
-1. Enter `ANACONDA_TOKEN` for the secret name
-1. Paste the Anaconda access token
-1. Click on the "Add secret" button
-1. Test the setup by creating a release candidate tag,
-which will result in a package built and uploaded to `https://anaconda.org/neutrons/mypackagename`
-
-### Add an access token to codecov
-
-Follow the instructions in the [Confluence page](https://ornl-neutrons.atlassian.net/wiki/spaces/NDPD/pages/103546883/Coverage+reports)
-to create the access token.
-
-## Packaging building instructions
-
-The default packaging flow in this repository is uv + PyPI-style distributions.
-Conda publishing is optional and can be handled separately when needed.
-
-### Instruction for publish to PyPI
-
-1. Make sure you have the correct access to the project on PyPI.
-1. Make sure `git status` returns a clean state.
-1. At the root of the repo, run `uv sync --group package`.
-1. Build distributions with `uv run python -m build`.
-1. Check the wheel with `uv run twine check dist/*`, everything should pass before we move to next step.
-1. When doing manual upload test, make sure to use testpypi instead of pypi.
-1. Use `uv run twine upload --repository testpypi dist/*` to upload to testpypi, you will need to specify the testpipy url in your `~/.pypirc`, i.e.
-
-``````
-[distutils]
-index-servers = pypi, testpypi
-
-[testpypi]
-    repository = https://test.pypi.org/legacy/
-    username = __token__
-    password = YOUR_TESTPYPI_TOKEN
-
-``````
-
-1. Test the package on testpypi with `pip install --index-url https://test.pypi.org/simple/ mypackagename`.
-1. If everything is good, use the Github workflow, `package.yml` to trigger the publishing to PyPI.
-
-### Instruction for publish to Anaconda
-
-Publishing to Anaconda is optional and handled via workflow, `package.yml`.
-If your target channel is not `neutrons`, update the upload workflow configuration accordingly.
 
 ## Development environment setup
 

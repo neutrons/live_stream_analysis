@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import argparse
 import logging
+import math
 import sys
+import time
 from pathlib import Path
 
 from . import nexus
 from .factory import build_reader, create_source_runner
 from .histogram import apply_corrections, load_pixel_q_conversion, validate_histogram_args, write_histogram_csv
+from ..intersect import (
+    build_histogram_payload,
+    build_run_complete_payload,
+    create_event_publisher,
+    infer_run_metadata,
+    load_intersect_config,
+)
 from .live_plot import HistogramPlotter, create_live_histogram_plotter, maybe_update_live_plot
 
 LOGGER = logging.getLogger(__name__)
@@ -25,6 +34,7 @@ def _configure_logging(args: argparse.Namespace) -> None:
 
 def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
     plotter: HistogramPlotter | None = None
+    publisher = None
     try:
         LOGGER.info("Starting histogram analysis")
         histogram_bins = validate_histogram_args(args)
@@ -50,6 +60,11 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
         plotter = create_live_histogram_plotter(args, histogram_bins)
         runner = create_source_runner(args)
         chunk_size = nexus.DEFAULT_NEXUS_CHUNK_SIZE
+        intersect_config = None
+        last_intersect_publish_at: float | None = None
+        if args.enable_intersect:
+            intersect_config = load_intersect_config(args.intersect_config)
+            publisher = create_event_publisher(intersect_config)
         if args.adara_file is not None:
             LOGGER.info("Using ADARA file source: %s", Path(args.adara_file).resolve())
         elif args.nexus_file is not None:
@@ -57,6 +72,22 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
         elif args.adara_stream is not None:
             LOGGER.info("Using ADARA live stream source: %s:%s", args.adara_stream[0], args.adara_stream[1])
         LOGGER.info("Beginning event accumulation")
+
+        def _publish_histogram_snapshot(step_count: int, hist: list[int]) -> None:
+            nonlocal last_intersect_publish_at
+            if publisher is None or intersect_config is None:
+                return
+            _ = step_count
+            now = time.monotonic()
+            interval = max(1, intersect_config.publish_interval_seconds)
+            if last_intersect_publish_at is not None and (now - last_intersect_publish_at) < interval:
+                return
+            last_intersect_publish_at = now
+            q_values = [args.histogram_q_min + (index * args.histogram_q_bin_size) for index in range(len(hist))]
+            errors = [math.sqrt(float(value)) for value in hist]
+            payload = build_histogram_payload(q_values, [float(value) for value in hist], errors)
+            publisher.publish_event(intersect_config.histogram_event_name, payload)
+
         packet_count, total_events, histogram_events, hist = runner.accumulate_histogram(
             reader,
             args,
@@ -64,6 +95,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             histogram_bins,
             plotter,
             chunk_size=chunk_size,
+            histogram_callback=_publish_histogram_snapshot,
         )
         LOGGER.info(
             "Finished event accumulation: packets_or_groups=%s total_events=%s histogrammed_events=%s",
@@ -82,6 +114,16 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             force=True,
         )
         LOGGER.info("Final histogram update complete")
+        if publisher is not None and intersect_config is not None:
+            q_values = [args.histogram_q_min + (index * args.histogram_q_bin_size) for index in range(len(corrected_hist))]
+            publisher.publish_event(
+                intersect_config.histogram_event_name,
+                build_histogram_payload(q_values, corrected_hist, corrected_error),
+            )
+            publisher.publish_event(
+                intersect_config.run_complete_event_name,
+                build_run_complete_payload(infer_run_metadata(args)),
+            )
     except KeyboardInterrupt:
         print("Interrupted by user", file=sys.stderr)
         return 130
@@ -91,6 +133,8 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
     finally:
         if plotter is not None:
             plotter.close()
+        if publisher is not None:
+            publisher.close()
 
     if args.histogram_output_csv is not None:
         try:

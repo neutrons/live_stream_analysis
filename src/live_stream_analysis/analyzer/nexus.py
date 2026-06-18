@@ -76,6 +76,7 @@ def accumulate_nexus_histogram(
     event_log_interval: int,
     *,
     chunk_size: int = DEFAULT_NEXUS_CHUNK_SIZE,
+    histogram_callback=None,
 ) -> tuple[int, int, int, list[int]]:
     packet_count = 0
     total_events = 0
@@ -119,6 +120,8 @@ def accumulate_nexus_histogram(
                         live_plot_refresh_every,
                         processed_chunks,
                     )
+                    if histogram_callback is not None:
+                        histogram_callback(processed_chunks, hist)
 
     finish_nexus_progress(total_chunks)
 

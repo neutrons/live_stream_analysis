@@ -1,0 +1,137 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    profiles: ["intersect"]
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  minio:
+    image: minio/minio:latest
+    profiles: ["intersect"]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  analyze-intersect-adara-file:
+    profiles: ["intersect", "adara-file"]
+    build:
+      context: .
+    working_dir: /work
+    depends_on:
+      - rabbitmq
+      - minio
+    volumes:
+      - .:/work
+    command:
+      - live_stream_analysis
+      - analyze
+      - --adara-file
+      - adara_mount/20250201/adara_streams/NOMAD.Raw.Data.Runs.208511-208543/20250131-101613.350178410-run-208511/m00000001-f00000001-run-208511.adara
+      - --histogram-pixel-geometry-csv
+      - pixel_geometry.csv
+      - --histogram-q-bin-size
+      - "0.02"
+      - --histogram-q-min
+      - "0.5"
+      - --histogram-q-max
+      - "30"
+      - --tof-tick-us
+      - "1.0"
+      - --background-subtraction
+      - background.csv
+      - --normalization
+      - normalization.csv
+      - --histogram-output-csv
+      - analyze_histogram.csv
+      - --enable-intersect
+      - --intersect-config
+      - /work/configs/intersect.example.yaml
+
+  intersect-event-listener:
+    profiles: ["intersect", "listener"]
+    build:
+      context: .
+    working_dir: /work
+    depends_on:
+      - rabbitmq
+      - minio
+    volumes:
+      - .:/work
+    command:
+      - live_stream_analysis
+      - intersect-listen
+      - --intersect-config
+      - /work/configs/intersect.example.yaml
+
+  analyze-intersect-nexus:
+    profiles: ["intersect", "nexus"]
+    build:
+      context: .
+    working_dir: /work
+    depends_on:
+      - rabbitmq
+      - minio
+    volumes:
+      - .:/work
+    command:
+      - live_stream_analysis
+      - analyze
+      - --nexus-file
+      - nexus_files/diamond/NOM_243708.nxs.h5
+      - --nexus-file
+      - nexus_files/diamond/NOM_243709.nxs.h5
+      - --histogram-pixel-geometry-csv
+      - pixel_geometry.csv
+      - --histogram-q-bin-size
+      - "0.02"
+      - --histogram-q-min
+      - "0.5"
+      - --histogram-q-max
+      - "30"
+      - --tof-tick-us
+      - "1.0"
+      - --histogram-output-csv
+      - analyze_histogram_nexus.csv
+      - --enable-intersect
+      - --intersect-config
+      - /work/configs/intersect.example.yaml
+
+  analyze-intersect-stream:
+    profiles: ["intersect", "adara-stream"]
+    build:
+      context: .
+    working_dir: /work
+    depends_on:
+      - rabbitmq
+      - minio
+    volumes:
+      - .:/work
+    command:
+      - live_stream_analysis
+      - analyze
+      - --adara-stream
+      - bl1b-daq1.sns.gov
+      - "31415"
+      - --histogram-pixel-geometry-csv
+      - pixel_geometry.csv
+      - --histogram-q-bin-size
+      - "0.02"
+      - --histogram-q-min
+      - "0.5"
+      - --histogram-q-max
+      - "30"
+      - --tof-tick-us
+      - "1.0"
+      - --histogram-output-csv
+      - analyze_histogram_stream.csv
+      - --enable-intersect
+      - --intersect-config
+      - /work/configs/intersect.example.yaml

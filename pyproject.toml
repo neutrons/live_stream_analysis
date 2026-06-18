@@ -16,6 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 docs = ["sphinx", "sphinx_rtd_theme", "myst-parser"]
+intersect = ["intersect-sdk", "pydantic>=2", "pyyaml>=6"]
 
 [project.scripts]
 live-stream-analysis-cli = "live_stream_analysis.main:main"
@@ -47,6 +48,7 @@ dev = ["pip-audit", "pre-commit", "ruff"]
 docs = ["myst-parser", "sphinx", "sphinx_rtd_theme"]
 package = ["build", "twine"]
 jupyter = ["ipympl", "ipywidgets", "jupyterlab"]
+intersect = ["intersect-sdk", "pydantic>=2", "pyyaml>=6"]
 
 [tool.uv]
 default-groups = ["dev", "test"]

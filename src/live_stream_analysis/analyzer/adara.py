@@ -60,6 +60,7 @@ def accumulate_adara_histogram(
     plotter: HistogramPlotter,
     live_plot_refresh_every: int,
     event_log_interval: int,
+    histogram_callback=None,
 ) -> tuple[int, int, int, list[int]]:
     packet_count = 0
     total_events = 0
@@ -97,6 +98,8 @@ def accumulate_adara_histogram(
             live_plot_refresh_every,
             packet_count,
         )
+        if histogram_callback is not None:
+            histogram_callback(packet_count, hist)
 
     return packet_count, total_events, histogram_events, hist
 

@@ -130,6 +130,46 @@ class TestAnalyzeParser:
             main(["analyze"])
         assert exc_info.value.code != 0
 
+    def test_accepts_enable_intersect_with_config(self, tmp_path: Path):
+        config_path = tmp_path / "intersect.yaml"
+        config_path.write_text("service: {}\n", encoding="utf-8")
+
+        args = build_parser().parse_args(
+            [
+                "analyze",
+                "--adara-file",
+                str(tmp_path / "sample.adara"),
+                "--enable-intersect",
+                "--intersect-config",
+                str(config_path),
+            ]
+        )
+
+        assert args.enable_intersect is True
+        assert args.intersect_config == str(config_path)
+
+    def test_enable_intersect_requires_config(self, tmp_path: Path):
+        with pytest.raises(SystemExit) as exc_info:
+            main(
+                [
+                    "analyze",
+                    "--adara-file",
+                    str(tmp_path / "sample.adara"),
+                    "--enable-intersect",
+                ]
+            )
+
+        assert exc_info.value.code != 0
+
+    def test_intersect_listener_subcommand_accepts_config(self, tmp_path: Path):
+        config_path = tmp_path / "intersect.yaml"
+        config_path.write_text("service: {}\n", encoding="utf-8")
+
+        args = build_parser().parse_args(["intersect-listen", "--intersect-config", str(config_path)])
+
+        assert args._cmd == "intersect-listen"
+        assert args.intersect_config == str(config_path)
+
 
 class TestAnalyzerHelpers:
     def test_compute_relative_uncertainty_uses_absolute_ratio_and_zero_guard(self):

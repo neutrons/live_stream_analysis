@@ -1,0 +1,28 @@
+service:
+  name: live-stream-analysis
+  publish_interval_seconds: 5
+
+hierarchy:
+  organization: ornl
+  facility: neutrons
+  system: nomad
+  subsystem: analysis
+  service: livestreamanalysis
+
+events:
+  histogram: histogram.updated
+  run_complete: run.completed
+
+broker:
+  protocol: amqp0.9.1
+  host: rabbitmq
+  port: 5672
+  username: guest
+  password: guest
+  is_root: true
+
+data_store:
+  host: minio
+  port: 9000
+  username: minioadmin
+  password: minioadmin
