@@ -19,6 +19,60 @@ uv run live_stream_analysis preparer \
     --iq-csv iq.csv
 ```
 
+### Generate background and normalization CSVs from NeXus files
+
+The same `preparer` command also reduces event NeXus files into the three-column CSVs
+used by the analyzer for background subtraction and normalization.
+
+Use `--mode background` to build a background curve:
+
+```bash
+uv run live_stream_analysis preparer \
+    --mode background \
+    --nexus-file nexus_files/mt_pac_can/NOM_243710.nxs.h5 \
+    --nexus-file nexus_files/mt_pac_can/NOM_243711.nxs.h5 \
+    --reduction-output-csv background.csv \
+    --q-min 0.0 \
+    --q-max 30.0
+```
+
+Use `--mode normalization` for vanadium normalization. In this mode the preparer
+applies a smoothing-based peak stripping step so sharp vanadium Bragg peaks are
+replaced by a local baseline before writing the CSV:
+
+```bash
+uv run live_stream_analysis preparer \
+    --mode normalization \
+    --nexus-file nexus_files/vanadium/NOM_243712.nxs.h5 \
+    --reduction-output-csv normalization.csv \
+    --q-min 0.0 \
+    --q-max 30.0
+```
+
+You can tune the vanadium peak stripping with:
+
+1. `--peak-window` for the smoothing window size
+2. `--peak-z-threshold` for the residual threshold used to classify peaks
+
+Example with custom stripping parameters:
+
+```bash
+uv run live_stream_analysis preparer \
+    --mode normalization \
+    --nexus-file nexus_files/vanadium/NOM_243712.nxs.h5 \
+    --reduction-output-csv normalization.csv \
+    --q-min 0.0 \
+    --q-max 30.0 \
+    --peak-window 41 \
+    --peak-z-threshold 2.5
+```
+
+Notes:
+
+1. Repeat `--nexus-file` to combine multiple runs into one reduced CSV.
+2. The output columns are `Q value`, `I(Q)`, and `Error I(Q)`.
+3. The current preparer reduction path uses a fixed `q_bin_size` of `0.02` and `tof_tick_us` of `1.0`.
+
 ### Optional: apply Mantid diffraction calibration
 
 You can optionally pass a Mantid Diffraction Calibration HDF5 file (`SaveDiffCal` format)
