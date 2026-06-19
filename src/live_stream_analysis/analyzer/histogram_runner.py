@@ -57,6 +57,8 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
         LOGGER.info("Loading pixel geometry CSV from %s", Path(args.histogram_pixel_geometry_csv).resolve())
         q_conversion = load_pixel_q_conversion(args.histogram_pixel_geometry_csv)
         runtime_state = HistogramRuntimeState(pixel_q_conversion=q_conversion)
+        if args.adara_file_delay_intersect:
+            runtime_state.configure_adara_file_read_gate(False)
         LOGGER.info("Loaded pixel geometry for %s detector ids", len(q_conversion.q_matrix_constants))
         if args.background_subtraction is not None:
             LOGGER.info("Background subtraction enabled: %s", Path(args.background_subtraction).resolve())
@@ -80,6 +82,13 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             LOGGER.info("Using %s NeXus file(s)", len(args.nexus_file))
         elif args.adara_stream is not None:
             LOGGER.info("Using ADARA live stream source: %s:%s", args.adara_stream[0], args.adara_stream[1])
+        if args.adara_file is not None and args.adara_file_delay_read > 0:
+            LOGGER.info("Delaying ADARA file read for %s seconds", args.adara_file_delay_read)
+            time.sleep(args.adara_file_delay_read)
+        if args.adara_file is not None and args.adara_file_delay_intersect:
+            LOGGER.info("Waiting for INTERSECT start_adara_file_read signal before reading ADARA file")
+            runtime_state.wait_for_adara_file_read_release()
+            LOGGER.info("Received INTERSECT start_adara_file_read signal")
         LOGGER.info("Beginning event accumulation")
 
         def _publish_histogram_snapshot(step_count: int, hist: list[int]) -> None:

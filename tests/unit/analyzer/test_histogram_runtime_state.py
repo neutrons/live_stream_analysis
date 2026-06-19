@@ -42,3 +42,13 @@ def test_pixel_tof_to_q_uses_runtime_conversion_when_updated():
     q_value = pixel_tof_to_q(runtime_state.pixel_q_conversion, pixel_id=0, tof_us=10.0)
 
     assert q_value == 5.0
+
+
+def test_runtime_state_can_block_and_release_adara_file_read():
+    runtime_state = HistogramRuntimeState(adara_file_read_released=False)
+
+    assert runtime_state.wait_for_adara_file_read_release(timeout=0.0) is False
+
+    runtime_state.release_adara_file_read()
+
+    assert runtime_state.wait_for_adara_file_read_release(timeout=0.0) is True

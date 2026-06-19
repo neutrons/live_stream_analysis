@@ -49,6 +49,12 @@ class CsvTextRequest(BaseModel):
     csv_text: str = Field(min_length=1)
 
 
+class StartAdaraFileReadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    release: bool = True
+
+
 class UpdateResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -56,6 +62,16 @@ class UpdateResponse(BaseModel):
     kind: str
 
 
+class StartAdaraFileReadResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: str
+    kind: str
+    released: bool
+
+
 CsvTextRequest.model_rebuild()
+StartAdaraFileReadRequest.model_rebuild()
+StartAdaraFileReadResponse.model_rebuild()
 UpdateResponse.model_rebuild()
 ServiceStatusPayload.model_rebuild()

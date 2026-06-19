@@ -63,6 +63,17 @@ def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         help="YAML config file containing INTERSECT broker, data store, and event settings.",
     )
     parser.add_argument(
+        "--adara-file-delay-read",
+        type=float,
+        default=0.0,
+        help="Delay reading an ADARA file source by N seconds after startup (default: 0).",
+    )
+    parser.add_argument(
+        "--adara-file-delay-intersect",
+        action="store_true",
+        help="Wait for the INTERSECT start_adara_file_read operation before reading an ADARA file source.",
+    )
+    parser.add_argument(
         "--histogram-pixel-geometry-csv",
         metavar="FILE",
         help=(

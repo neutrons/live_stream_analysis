@@ -148,6 +148,21 @@ class TestAnalyzeParser:
         assert args.enable_intersect is True
         assert args.intersect_config == str(config_path)
 
+    def test_accepts_adara_file_delay_flags(self, tmp_path: Path):
+        args = build_parser().parse_args(
+            [
+                "analyze",
+                "--adara-file",
+                str(tmp_path / "sample.adara"),
+                "--adara-file-delay-read",
+                "2.5",
+                "--adara-file-delay-intersect",
+            ]
+        )
+
+        assert args.adara_file_delay_read == 2.5
+        assert args.adara_file_delay_intersect is True
+
     def test_enable_intersect_requires_config(self, tmp_path: Path):
         with pytest.raises(SystemExit) as exc_info:
             main(

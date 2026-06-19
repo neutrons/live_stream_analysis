@@ -21,8 +21,8 @@ broker:
   password: guest
   is_root: true
 
-data_store:
-  host: minio
-  port: 9000
-  username: minioadmin
-  password: minioadmin
+# data_store:
+#   host: minio
+#   port: 9000
+#   username: minioadmin
+#   password: minioadmin

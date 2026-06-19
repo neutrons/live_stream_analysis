@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from live_stream_analysis.intersect.data_models import CsvTextRequest
+from live_stream_analysis.intersect.data_models import CsvTextRequest, StartAdaraFileReadRequest
 from live_stream_analysis.intersect.service import LiveStreamAnalysisCapability
 
 
@@ -67,3 +67,16 @@ def test_set_background_rejects_invalid_csv():
 
     with pytest.raises(ValueError, match="Correction CSV"):
         capability.set_background(CsvTextRequest(csv_text="bad,data\n1,2\n"))
+
+
+def test_start_adara_file_read_releases_runtime_gate():
+    capability = LiveStreamAnalysisCapability()
+    capability.runtime_state.configure_adara_file_read_gate(False)
+
+    response = capability.start_adara_file_read(StartAdaraFileReadRequest(release=True))
+
+    assert response.status == "updated"
+    assert response.kind == "adara_file_read"
+    assert response.released is True
+    assert capability.runtime_state.adara_file_read_released is True
+    assert capability.runtime_state.wait_for_adara_file_read_release(timeout=0.0) is True
