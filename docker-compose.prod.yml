@@ -28,7 +28,7 @@ services:
       - bl1b-daq1.sns.gov
       - "31415"
       - --histogram-pixel-geometry-csv
-      - /work/tests/data/csv_files/pixel_geometry.csv
+      - /work/input_files/pixel_geometry.csv
       - --histogram-q-bin-size
       - "0.02"
       - --histogram-q-min
@@ -40,9 +40,9 @@ services:
       - --histogram-output-csv
       - analyze_histogram_stream.csv
       - --background-subtraction
-      - /work/tests/data/csv_files/background.csv
+      - /work/input_files/background.csv
       - --normalization
-      - /work/tests/data/csv_files/normalization.csv
+      - /work/input_files/normalization.csv
       - --histogram-output-csv
       - analyze_histogram.csv
       - --live-plot-mode
