@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -25,6 +23,12 @@ class RunMetadata(BaseModel):
     instrument: str = "nomad"
     ipts: int | None = None
     run_number: int | None = None
+
+
+class ServiceStatusPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: str
 
 
 class IntersectConfig(BaseModel):
@@ -54,3 +58,4 @@ class UpdateResponse(BaseModel):
 
 CsvTextRequest.model_rebuild()
 UpdateResponse.model_rebuild()
+ServiceStatusPayload.model_rebuild()
