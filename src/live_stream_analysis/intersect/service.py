@@ -1,21 +1,20 @@
-from __future__ import annotations
-
-from typing import Any, ClassVar, Protocol
+from typing import ClassVar, Protocol
 
 from intersect_sdk import IntersectBaseCapabilityImplementation, IntersectEventDefinition, IntersectService, intersect_status
+from pydantic import BaseModel
 
 from .config import build_service_config
-from .data_models import IntersectConfig
+from .data_models import HistogramEventPayload, IntersectConfig, RunCompleteEventPayload
 
 
 class EventPublisher(Protocol):
-    def publish_event(self, event_name: str, payload: dict[str, Any]) -> None: ...
+    def publish_event(self, event_name: str, payload: BaseModel) -> None: ...
 
     def close(self) -> None: ...
 
 
 class NullEventPublisher:
-    def publish_event(self, event_name: str, payload: dict[str, Any]) -> None:
+    def publish_event(self, event_name: str, payload: BaseModel) -> None:
         _ = (event_name, payload)
 
     def close(self) -> None:
@@ -25,8 +24,8 @@ class NullEventPublisher:
 class LiveStreamAnalysisCapability(IntersectBaseCapabilityImplementation):
     intersect_sdk_capability_name = "nomadanalysis"
     intersect_sdk_events: ClassVar[dict[str, IntersectEventDefinition]] = {
-        "histogram_updated": IntersectEventDefinition(event_type=dict[str, Any]),
-        "run_completed": IntersectEventDefinition(event_type=dict[str, Any]),
+        "histogram_updated": IntersectEventDefinition(event_type=HistogramEventPayload),
+        "run_completed": IntersectEventDefinition(event_type=RunCompleteEventPayload),
     }
 
     @intersect_status()
@@ -41,7 +40,7 @@ class IntersectEventPublisher:
         self._service = IntersectService([self._capability], build_service_config(config))
         self._service.startup()
 
-    def publish_event(self, event_name: str, payload: dict[str, Any]) -> None:
+    def publish_event(self, event_name: str, payload: BaseModel) -> None:
         self._capability.intersect_sdk_emit_event(_event_key_for_name(self._config, event_name), payload)
 
     def close(self) -> None:

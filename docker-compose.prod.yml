@@ -1,0 +1,65 @@
+services:
+  intersect-event-listener:
+    profiles: ["intersect", "listener"]
+    build:
+      context: .
+    working_dir: /work
+    volumes:
+      - .:/work
+    command:
+      - live_stream_analysis
+      - intersect-listen
+      - --intersect-config
+      - /work/configs/intersect.example.yaml
+
+  analyze-intersect-stream:
+    profiles: ["intersect", "adara-stream"]
+    build:
+      context: .
+    working_dir: /work
+    ports:
+      - "8080:8000"
+    volumes:
+      - .:/work
+    command:
+      - live_stream_analysis
+      - analyze
+      - --adara-stream
+      - bl1b-daq1.sns.gov
+      - "31415"
+      - --histogram-pixel-geometry-csv
+      - /work/tests/data/csv_files/pixel_geometry.csv
+      - --histogram-q-bin-size
+      - "0.02"
+      - --histogram-q-min
+      - "0.5"
+      - --histogram-q-max
+      - "30"
+      - --tof-tick-us
+      - "1.0"
+      - --histogram-output-csv
+      - analyze_histogram_stream.csv
+      - --background-subtraction
+      - /work/tests/data/csv_files/background.csv
+      - --normalization
+      - /work/tests/data/csv_files/normalization.csv
+      - --histogram-output-csv
+      - analyze_histogram.csv
+      - --live-plot-mode
+      - browser
+      - --live-plot-host
+      - 0.0.0.0
+      - --live-plot-port
+      - "8000"
+      - --live-plot-no-open-browser
+      - --live-plot-keep-open
+      - --live-plot-refresh-every
+      - "1000"
+      - --log-level
+      - INFO
+      - --event-log-interval
+      - "100000"
+      - --enable-intersect
+      - --intersect-config
+      - /work/configs/intersect.example.yaml
+      

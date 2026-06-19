@@ -1,17 +1,16 @@
-from __future__ import annotations
-
 import re
-from typing import Any
 
 from .data_models import HistogramEventPayload, RunCompleteEventPayload, RunMetadata
 
 
-def build_histogram_payload(q_values: list[float], intensities: list[float], errors: list[float]) -> dict[str, Any]:
-    return HistogramEventPayload(q=q_values, intensity=intensities, error=errors).model_dump(exclude_none=True)
+def build_histogram_payload(
+    q_values: list[float], intensities: list[float], errors: list[float]
+) -> HistogramEventPayload:
+    return HistogramEventPayload(q=q_values, intensity=intensities, error=errors)
 
 
-def build_run_complete_payload(metadata: RunMetadata) -> dict[str, Any]:
-    return RunCompleteEventPayload(**metadata.model_dump()).model_dump(exclude_none=True)
+def build_run_complete_payload(metadata: RunMetadata) -> RunCompleteEventPayload:
+    return RunCompleteEventPayload(**metadata.model_dump())
 
 
 def infer_run_metadata(args) -> RunMetadata:
