@@ -32,3 +32,20 @@ def event_packet(events: list[tuple[int, int]], timestamp_s: int = 2) -> bytes:
     events_b = b"".join(struct.pack("<II", pixid, tof) for pixid, tof in events)
     payload = header_meta + events_b
     return _pack_header(len(payload), 0x300, timestamp_s) + payload
+
+
+def run_status_packet(
+    *,
+    run_number: int,
+    run_start: int,
+    status: int,
+    file_number: int = 0,
+    pause_file_number: int = 0,
+    paused: int = 0,
+    addendum_file_number: int = 0,
+    addendum: int = 0,
+    timestamp_s: int = 0,
+) -> bytes:
+    """Build an AdaraRunStatusPacket (base format_int=0x400001)."""
+    payload = struct.pack("<IIIII", run_number, run_start, (status << 24) | file_number, (paused << 24) | pause_file_number, (addendum << 24) | addendum_file_number)
+    return _pack_header(len(payload), 0x400001, timestamp_s)

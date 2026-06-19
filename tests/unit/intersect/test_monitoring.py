@@ -13,7 +13,7 @@ from live_stream_analysis.intersect.events import (
 def test_build_histogram_payload_returns_typed_schema_shape():
     payload = build_histogram_payload([0.1, 0.2], [10.0, 20.0], [1.0, 2.0])
 
-    assert payload == {
+    assert payload.model_dump() == {
         "q": [0.1, 0.2],
         "intensity": [10.0, 20.0],
         "error": [1.0, 2.0],
@@ -23,7 +23,7 @@ def test_build_histogram_payload_returns_typed_schema_shape():
 def test_build_run_complete_payload_omits_none_fields():
     payload = build_run_complete_payload(RunMetadata(instrument="nomad", ipts=None, run_number=243451))
 
-    assert payload == {"instrument": "nomad", "run_number": 243451}
+    assert payload.model_dump(exclude_none=True) == {"instrument": "nomad", "run_number": 243451}
 
 
 def test_infer_run_metadata_extracts_ipts_and_run_number_from_adara_path():

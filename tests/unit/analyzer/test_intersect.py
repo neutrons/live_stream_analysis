@@ -77,7 +77,7 @@ def test_build_run_complete_payload_omits_unknown_ipts():
         RunMetadata(instrument="nomad", ipts=None, run_number=243451)
     )
 
-    assert payload == {"instrument": "nomad", "run_number": 243451}
+    assert payload.model_dump(exclude_none=True) == {"instrument": "nomad", "run_number": 243451}
 
 
 def test_build_run_complete_payload_includes_known_ipts():
@@ -85,7 +85,7 @@ def test_build_run_complete_payload_includes_known_ipts():
         RunMetadata(instrument="nomad", ipts=12345, run_number=243451)
     )
 
-    assert payload == {"instrument": "nomad", "ipts": 12345, "run_number": 243451}
+    assert payload.model_dump(exclude_none=True) == {"instrument": "nomad", "ipts": 12345, "run_number": 243451}
 
 
 def test_build_service_config_uses_amqp_and_minio_defaults(tmp_path: Path):

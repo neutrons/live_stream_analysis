@@ -8,14 +8,18 @@ import math
 
 try:
     from readadara import AdaraFileReader, AdaraLiveStreamReader
+    from readadara.adara_reader import AdaraRunStatusPacket
 except ImportError:  # pragma: no cover
     AdaraFileReader = None
     AdaraLiveStreamReader = None
+    AdaraRunStatusPacket = None
 
 from .histogram import PixelQConversion, pixel_tof_to_q
 from .live_plot import HistogramPlotter, maybe_update_live_plot
 
 LOGGER = logging.getLogger(__name__)
+
+ADARA_RUN_STATUS_END_RUN = 4
 
 
 def build_reader(args: argparse.Namespace):
@@ -62,16 +66,27 @@ def accumulate_adara_histogram(
     event_log_interval: int,
     q_conversion_provider=None,
     histogram_callback=None,
+    run_complete_callback=None,
+    histogram_state_callback=None,
 ) -> tuple[int, int, int, list[int]]:
     packet_count = 0
     total_events = 0
     histogram_events = 0
     hist = [0] * histogram_bins
+    if histogram_state_callback is not None:
+        histogram_state_callback(hist)
     event_log_interval = max(1, event_log_interval)
     next_event_log = event_log_interval
 
     for packet in reader.read_generator():
         packet_count += 1
+        if (
+            run_complete_callback is not None
+            and AdaraRunStatusPacket is not None
+            and isinstance(packet, AdaraRunStatusPacket)
+            and packet.get_status() == ADARA_RUN_STATUS_END_RUN
+        ):
+            run_complete_callback(packet)
         events = packet.get_events()
         total_events += len(events)
 

@@ -23,6 +23,8 @@ class HistogramSourceRunner(Protocol):
         chunk_size: int,
         q_conversion_provider=None,
         histogram_callback=None,
+        run_complete_callback=None,
+        histogram_state_callback=None,
     ): ...
 
     def run_basic_mode(self, reader, *, chunk_size: int) -> int: ...
@@ -41,6 +43,8 @@ class _AdaraRunner:
         chunk_size: int,
         q_conversion_provider=None,
         histogram_callback=None,
+        run_complete_callback=None,
+        histogram_state_callback=None,
     ):
         _ = chunk_size
         return accumulate_adara_histogram(
@@ -55,6 +59,8 @@ class _AdaraRunner:
             event_log_interval=args.event_log_interval,
             q_conversion_provider=q_conversion_provider,
             histogram_callback=histogram_callback,
+            run_complete_callback=run_complete_callback,
+            histogram_state_callback=histogram_state_callback,
         )
 
     def run_basic_mode(self, reader, *, chunk_size: int) -> int:
@@ -75,7 +81,10 @@ class _NexusRunner:
         chunk_size: int,
         q_conversion_provider=None,
         histogram_callback=None,
+        run_complete_callback=None,
+        histogram_state_callback=None,
     ):
+        _ = (run_complete_callback, histogram_state_callback)
         return accumulate_nexus_histogram(
             nexus_files=reader,
             q_conversion=q_conversion,

@@ -574,6 +574,105 @@ class TestAdaraFileCLI:
         assert updates
         assert updates[-1] == (-1, -1)
 
+    def test_histogram_mode_end_run_publishes_completion_and_resets_histogram(self, tmp_path: Path, monkeypatch):
+        path = _write_adara(tmp_path, null_packet())
+        pixel_csv = tmp_path / "pixel_geometry.csv"
+        pixel_csv.write_text(
+            "\n".join(
+                [
+                    "pixel id,L2 value,theta value,TOF-to-Q matrix element",
+                    "0,1.0,1.0,0.0",
+                    "1,1.0,1.0,99.0",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        config_path = tmp_path / "intersect.yaml"
+        config_path.write_text(
+            "\n".join(
+                [
+                    "service:",
+                    "  name: nomadanalysis",
+                    "  publish_interval_seconds: 1",
+                    "events:",
+                    "  histogram: histogram.updated",
+                    "  run_complete: run.completed",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        published: list[tuple[str, object]] = []
+
+        class _StubPublisher:
+            def publish_event(self, name, payload):
+                published.append((name, payload))
+
+            def close(self):
+                return
+
+        class _StubRunner:
+            def accumulate_histogram(
+                self,
+                reader,
+                args,
+                q_conversion,
+                histogram_bins,
+                plotter,
+                *,
+                chunk_size,
+                q_conversion_provider=None,
+                histogram_callback=None,
+                run_complete_callback=None,
+                histogram_state_callback=None,
+            ):
+                _ = (reader, args, q_conversion, histogram_bins, plotter, chunk_size, q_conversion_provider, histogram_callback)
+                hist = [0] * 5000
+                histogram_state_callback(hist)
+                hist[4950] = 2
+                run_complete_callback(object())
+                hist[4950] = 1
+                return 5, 3, 3, hist
+
+            def run_basic_mode(self, reader, *, chunk_size: int) -> int:
+                _ = (reader, chunk_size)
+                return 0
+
+        monkeypatch.setattr(
+            "live_stream_analysis.analyzer.histogram_runner.create_event_publisher",
+            lambda _config, runtime_state=None: _StubPublisher(),
+        )
+        monkeypatch.setattr(
+            "live_stream_analysis.analyzer.histogram_runner.create_source_runner",
+            lambda _args: _StubRunner(),
+        )
+
+        rc = main(
+            [
+                "analyze",
+                "--adara-file",
+                str(path),
+                "--histogram-pixel-geometry-csv",
+                str(pixel_csv),
+                "--histogram-q-max",
+                "100",
+                "--histogram-q-bin-size",
+                "0.02",
+                "--enable-intersect",
+                "--intersect-config",
+                str(config_path),
+            ]
+        )
+
+        assert rc == 0
+        histogram_events = [payload for name, payload in published if name == "histogram.updated"]
+        run_complete_events = [payload for name, payload in published if name == "run.completed"]
+        assert len(run_complete_events) == 2
+        assert len(histogram_events) >= 2
+        assert max(histogram_events[0].intensity) == 2.0
+        assert max(histogram_events[-1].intensity) == 1.0
+
     def test_histogram_mode_live_plot_refresh_every_throttles_intermediate_updates(self, tmp_path: Path, monkeypatch):
         path = _write_adara(tmp_path, event_packet([(1, 1)]), event_packet([(1, 1)]), event_packet([(1, 1)]))
         pixel_csv = tmp_path / "pixel_geometry.csv"

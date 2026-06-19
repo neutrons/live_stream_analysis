@@ -85,6 +85,38 @@ uv run live_stream_analysis analyze \
     --histogram-output-csv sample_histogram.csv
 ```
 
+### ADARA run status handling
+
+The analyzer inspects ADARA run-status packets while accumulating events. The
+status codes used by the upstream ADARA protocol are:
+
+1. `0`: `NO_RUN`
+2. `1`: `NEW_RUN`
+3. `2`: `RUN_EOF`
+4. `3`: `RUN_BOF`
+5. `4`: `END_RUN`
+6. `5`: `STATE`
+7. `6`: `PROLOGUE`
+
+For live-stream-analysis, the important distinction is that `END_RUN` is the
+explicit end-of-run signal. `RUN_EOF` is only end-of-file for the current ADARA
+file segment and does not mean the run is complete.
+
+Current analyzer behavior is:
+
+1. Keep histogramming events normally across packets.
+2. When a run-status packet with `status == 4` (`END_RUN`) arrives, finalize the
+    current histogram immediately.
+3. Apply background subtraction and normalization to that completed run.
+4. Publish the final corrected histogram snapshot and the INTERSECT
+    `run_completed` event when INTERSECT mode is enabled.
+5. Reset the in-memory histogram buffer to zeros so subsequent packets start a
+    fresh histogram for the next run.
+
+At process shutdown, if there is still an active histogram with data that has
+not yet seen an explicit `END_RUN`, the analyzer still finalizes and publishes
+that trailing histogram once before exit.
+
 For a full local example with background subtraction, normalization, live plotting,
 and progress logging enabled:
 

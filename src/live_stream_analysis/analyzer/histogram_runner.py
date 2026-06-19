@@ -40,6 +40,9 @@ def _configure_logging(args: argparse.Namespace) -> None:
 def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
     plotter: HistogramPlotter | None = None
     publisher = None
+    corrected_hist: list[float] = []
+    corrected_error: list[float] = []
+    active_hist: list[int] | None = None
     try:
         LOGGER.info("Starting histogram analysis")
         histogram_bins = validate_histogram_args(args)
@@ -94,6 +97,39 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             payload = build_histogram_payload(q_values, [float(value) for value in hist], errors)
             publisher.publish_event(intersect_config.histogram_event_name, payload)
 
+        def _finalize_run(hist: list[int]) -> tuple[list[float], list[float]]:
+            final_hist, final_error = apply_corrections(hist, args, histogram_bins, runtime_state=runtime_state)
+            maybe_update_live_plot(
+                plotter,
+                final_hist,
+                final_error,
+                args.live_plot_refresh_every,
+                1,
+                force=True,
+            )
+            if publisher is not None and intersect_config is not None:
+                q_values = [args.histogram_q_min + (index * args.histogram_q_bin_size) for index in range(len(final_hist))]
+                publisher.publish_event(
+                    intersect_config.histogram_event_name,
+                    build_histogram_payload(q_values, final_hist, final_error),
+                )
+                publisher.publish_event(
+                    intersect_config.run_complete_event_name,
+                    build_run_complete_payload(infer_run_metadata(args)),
+                )
+            return final_hist, final_error
+
+        def _handle_run_complete(_packet) -> None:
+            nonlocal corrected_hist, corrected_error
+            if active_hist is None:
+                return
+            corrected_hist, corrected_error = _finalize_run(active_hist)
+            active_hist[:] = [0] * len(active_hist)
+
+        def _set_active_hist(hist: list[int]) -> None:
+            nonlocal active_hist
+            active_hist = hist
+
         packet_count, total_events, histogram_events, hist = runner.accumulate_histogram(
             reader,
             args,
@@ -103,7 +139,10 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             chunk_size=chunk_size,
             q_conversion_provider=lambda: runtime_state.pixel_q_conversion,
             histogram_callback=_publish_histogram_snapshot,
+            run_complete_callback=_handle_run_complete,
+            histogram_state_callback=_set_active_hist,
         )
+        active_hist = hist
         LOGGER.info(
             "Finished event accumulation: packets_or_groups=%s total_events=%s histogrammed_events=%s",
             packet_count,
@@ -111,29 +150,15 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             histogram_events,
         )
         LOGGER.info("Applying background subtraction and normalization corrections")
-        corrected_hist, corrected_error = apply_corrections(hist, args, histogram_bins, runtime_state=runtime_state)
-        maybe_update_live_plot(
-            plotter,
-            corrected_hist,
-            corrected_error,
-            args.live_plot_refresh_every,
-            1,
-            force=True,
-        )
+        if any(hist):
+            corrected_hist, corrected_error = _finalize_run(hist)
+        else:
+            corrected_hist = [0.0] * histogram_bins
+            corrected_error = [0.0] * histogram_bins
         LOGGER.info("Final histogram update complete")
         if plotter is not None and _should_keep_live_plot_open(args):
             LOGGER.info("Keeping browser live plot available at %s until interrupted", getattr(plotter, "url", "configured host/port"))
             plotter.wait_until_closed()
-        if publisher is not None and intersect_config is not None:
-            q_values = [args.histogram_q_min + (index * args.histogram_q_bin_size) for index in range(len(corrected_hist))]
-            publisher.publish_event(
-                intersect_config.histogram_event_name,
-                build_histogram_payload(q_values, corrected_hist, corrected_error),
-            )
-            publisher.publish_event(
-                intersect_config.run_complete_event_name,
-                build_run_complete_payload(infer_run_metadata(args)),
-            )
     except KeyboardInterrupt:
         print("Interrupted by user", file=sys.stderr)
         return 130

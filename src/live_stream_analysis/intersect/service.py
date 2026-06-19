@@ -1,12 +1,3 @@
-<<<<<<< Updated upstream
-from typing import ClassVar, Protocol
-
-from intersect_sdk import IntersectBaseCapabilityImplementation, IntersectEventDefinition, IntersectService, intersect_status
-from pydantic import BaseModel
-
-from .config import build_service_config
-from .data_models import HistogramEventPayload, IntersectConfig, RunCompleteEventPayload
-=======
 import csv
 import io
 from dataclasses import dataclass, field
@@ -28,17 +19,16 @@ from .data_models import (
     RunCompleteEventPayload,
     UpdateResponse,
 )
->>>>>>> Stashed changes
 
 
 class EventPublisher(Protocol):
-    def publish_event(self, event_name: str, payload: BaseModel) -> None: ...
+    def publish_event(self, event_name: str, payload: dict[str, Any]) -> None: ...
 
     def close(self) -> None: ...
 
 
 class NullEventPublisher:
-    def publish_event(self, event_name: str, payload: BaseModel) -> None:
+    def publish_event(self, event_name: str, payload: dict[str, Any]) -> None:
         _ = (event_name, payload)
 
     def close(self) -> None:
@@ -146,7 +136,7 @@ class IntersectEventPublisher:
         self._service = IntersectService([self._capability], build_service_config(config))
         self._service.startup()
 
-    def publish_event(self, event_name: str, payload: BaseModel) -> None:
+    def publish_event(self, event_name: str, payload: dict[str, Any]) -> None:
         self._capability.intersect_sdk_emit_event(_event_key_for_name(self._config, event_name), payload)
 
     def close(self) -> None:
