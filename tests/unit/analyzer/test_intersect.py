@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from intersect_sdk import get_schema_from_capability_implementations
+from intersect_sdk_common import HierarchyConfig
 
 from live_stream_analysis.intersect import (
     IntersectConfig,
@@ -12,6 +14,7 @@ from live_stream_analysis.intersect import (
     build_service_config,
     load_intersect_config,
 )
+from live_stream_analysis.intersect.service import LiveStreamAnalysisCapability
 
 
 def test_load_intersect_config_reads_publish_interval_and_topics(tmp_path: Path):
@@ -147,3 +150,38 @@ def test_build_client_config_subscribes_to_both_events(tmp_path: Path):
         item.event_name for item in client_config.initial_message_event_config.services_to_start_listening_for_events
     ]
     assert event_names == ["histogram_updated", "run_completed"]
+
+
+def test_generated_intersect_schema_includes_live_update_endpoints_and_models():
+    schema = get_schema_from_capability_implementations(
+        [LiveStreamAnalysisCapability],
+        hierarchy=HierarchyConfig(
+            organization="ornl",
+            facility="neutrons",
+            system="nomad",
+            subsystem="analysis",
+            service="livestreamanalysis",
+        ),
+    )
+
+    capability_schema = schema["capabilities"]["nomadanalysis"]
+    endpoints = capability_schema["endpoints"]
+
+    for endpoint_name in ["set_background", "set_normalization", "set_pixel_geometry_conversion"]:
+        assert endpoints[endpoint_name]["subscribe"]["message"]["payload"] == {
+            "$ref": "#/components/schemas/CsvTextRequest"
+        }
+        assert endpoints[endpoint_name]["publish"]["message"]["payload"] == {
+            "$ref": "#/components/schemas/UpdateResponse"
+        }
+
+    assert capability_schema["events"]["histogram_updated"]["payload"] == {
+        "$ref": "#/components/schemas/HistogramEventPayload"
+    }
+    assert capability_schema["events"]["run_completed"]["payload"] == {
+        "$ref": "#/components/schemas/RunCompleteEventPayload"
+    }
+
+    component_schemas = schema["components"]["schemas"]
+    assert "CsvTextRequest" in component_schemas
+    assert "UpdateResponse" in component_schemas

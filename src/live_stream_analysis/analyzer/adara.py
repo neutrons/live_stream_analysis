@@ -52,7 +52,7 @@ def build_reader(args: argparse.Namespace):
 
 def accumulate_adara_histogram(
     reader,
-    q_conversion: PixelQConversion,
+    q_conversion: PixelQConversion | None,
     histogram_bins: int,
     histogram_q_min: float,
     histogram_q_bin_size: float,
@@ -60,6 +60,7 @@ def accumulate_adara_histogram(
     plotter: HistogramPlotter,
     live_plot_refresh_every: int,
     event_log_interval: int,
+    q_conversion_provider=None,
     histogram_callback=None,
 ) -> tuple[int, int, int, list[int]]:
     packet_count = 0
@@ -75,7 +76,10 @@ def accumulate_adara_histogram(
         total_events += len(events)
 
         for pixel_id, tof in events:
-            q = pixel_tof_to_q(q_conversion, pixel_id, float(tof) * tof_tick_us)
+            active_q_conversion = q_conversion_provider() if q_conversion_provider is not None else q_conversion
+            if active_q_conversion is None:
+                continue
+            q = pixel_tof_to_q(active_q_conversion, pixel_id, float(tof) * tof_tick_us)
             if q is None:
                 continue
             bram_index = int((q - histogram_q_min) / histogram_q_bin_size)

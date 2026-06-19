@@ -66,7 +66,7 @@ def iter_nexus_event_chunks(group: h5py.Group, chunk_size: int):
 
 def accumulate_nexus_histogram(
     nexus_files: list[str],
-    q_conversion: PixelQConversion,
+    q_conversion: PixelQConversion | None,
     histogram_bins: int,
     histogram_q_min: float,
     histogram_q_bin_size: float,
@@ -76,6 +76,7 @@ def accumulate_nexus_histogram(
     event_log_interval: int,
     *,
     chunk_size: int = DEFAULT_NEXUS_CHUNK_SIZE,
+    q_conversion_provider=None,
     histogram_callback=None,
 ) -> tuple[int, int, int, list[int]]:
     packet_count = 0
@@ -94,8 +95,22 @@ def accumulate_nexus_histogram(
                 total_events += int(group["event_id"].shape[0])
 
                 for event_ids, event_tof in iter_nexus_event_chunks(group, chunk_size):
+                    active_q_conversion = q_conversion_provider() if q_conversion_provider is not None else q_conversion
+                    if active_q_conversion is None:
+                        processed_chunks += 1
+                        print_nexus_progress(processed_chunks, total_chunks, nexus_file)
+                        maybe_update_live_plot(
+                            plotter,
+                            hist,
+                            [math.sqrt(float(value)) for value in hist],
+                            live_plot_refresh_every,
+                            processed_chunks,
+                        )
+                        if histogram_callback is not None:
+                            histogram_callback(processed_chunks, hist)
+                        continue
                     for pixel_id, tof in zip(event_ids.tolist(), event_tof.tolist(), strict=True):
-                        q = pixel_tof_to_q(q_conversion, pixel_id, float(tof) * tof_tick_us)
+                        q = pixel_tof_to_q(active_q_conversion, pixel_id, float(tof) * tof_tick_us)
                         if q is None:
                             continue
                         bram_index = int((q - histogram_q_min) / histogram_q_bin_size)

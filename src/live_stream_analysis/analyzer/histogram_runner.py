@@ -19,6 +19,7 @@ from ..intersect import (
     infer_run_metadata,
     load_intersect_config,
 )
+from ..intersect.service import HistogramRuntimeState
 from .live_plot import HistogramPlotter, create_live_histogram_plotter, maybe_update_live_plot
 
 LOGGER = logging.getLogger(__name__)
@@ -52,6 +53,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
         )
         LOGGER.info("Loading pixel geometry CSV from %s", Path(args.histogram_pixel_geometry_csv).resolve())
         q_conversion = load_pixel_q_conversion(args.histogram_pixel_geometry_csv)
+        runtime_state = HistogramRuntimeState(pixel_q_conversion=q_conversion)
         LOGGER.info("Loaded pixel geometry for %s detector ids", len(q_conversion.q_matrix_constants))
         if args.background_subtraction is not None:
             LOGGER.info("Background subtraction enabled: %s", Path(args.background_subtraction).resolve())
@@ -68,7 +70,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
         last_intersect_publish_at: float | None = None
         if args.enable_intersect:
             intersect_config = load_intersect_config(args.intersect_config)
-            publisher = create_event_publisher(intersect_config)
+            publisher = create_event_publisher(intersect_config, runtime_state=runtime_state)
         if args.adara_file is not None:
             LOGGER.info("Using ADARA file source: %s", Path(args.adara_file).resolve())
         elif args.nexus_file is not None:
@@ -99,6 +101,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             histogram_bins,
             plotter,
             chunk_size=chunk_size,
+            q_conversion_provider=lambda: runtime_state.pixel_q_conversion,
             histogram_callback=_publish_histogram_snapshot,
         )
         LOGGER.info(
@@ -108,7 +111,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             histogram_events,
         )
         LOGGER.info("Applying background subtraction and normalization corrections")
-        corrected_hist, corrected_error = apply_corrections(hist, args, histogram_bins)
+        corrected_hist, corrected_error = apply_corrections(hist, args, histogram_bins, runtime_state=runtime_state)
         maybe_update_live_plot(
             plotter,
             corrected_hist,

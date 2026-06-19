@@ -13,7 +13,7 @@ from live_stream_analysis.analyzer.factory import build_reader as _build_reader
 from live_stream_analysis.analyzer.histogram import load_correction_csv
 from live_stream_analysis.analyzer.live_plot import BrowserHistogramPlotter, compute_relative_uncertainty
 from live_stream_analysis.main import build_parser, main
-from tests.analyzer.adara_fixtures import event_packet, null_packet, rtdl_packet
+from tests.unit.analyzer.adara_fixtures import event_packet, null_packet, rtdl_packet
 
 
 def _write_adara(tmp_path: Path, *packets: bytes) -> Path:

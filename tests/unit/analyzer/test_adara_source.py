@@ -9,7 +9,7 @@ from readadara import AdaraFileReader
 from live_stream_analysis.analyzer.adara import accumulate_adara_histogram, build_reader
 from live_stream_analysis.analyzer.histogram import PixelQConversion
 from live_stream_analysis.analyzer.live_plot import NullHistogramPlotter
-from tests.analyzer.adara_fixtures import event_packet
+from tests.unit.analyzer.adara_fixtures import event_packet
 
 
 def _write_adara(tmp_path: Path, *packets: bytes) -> Path:

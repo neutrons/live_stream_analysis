@@ -10,6 +10,9 @@ from live_stream_analysis.preparer.converter import write_pixel_geometry_csv
 from live_stream_analysis.preparer.instrument import build_detector_geometry
 
 
+TESTS_ROOT = Path(__file__).parents[2]
+
+
 def _minimal_idf() -> str:
     return """<?xml version='1.0' encoding='UTF-8'?>
 <instrument name='TEST' xmlns='http://www.mantidproject.org/IDF/1.0'>
@@ -51,7 +54,7 @@ def _write_nexus(tmp_path: Path, name: str, event_ids: list[int], event_tofs: li
 
 
 def test_preparer_cli_writes_csv_outputs(tmp_path: Path) -> None:
-    fixture_dir = Path(__file__).parents[1] / "data" / "idf"
+    fixture_dir = TESTS_ROOT / "data" / "idf"
     idf_path = fixture_dir / "NOMAD_Definition.xml"
     pixel_csv = tmp_path / "pixel_geometry.csv"
     iq_csv = tmp_path / "iq.csv"
@@ -84,7 +87,7 @@ def test_preparer_cli_writes_csv_outputs(tmp_path: Path) -> None:
 
 
 def test_pixel_geometry_targets_match_all_idf_inputs(tmp_path: Path) -> None:
-    fixture_dir = Path(__file__).parents[1] / "data"
+    fixture_dir = TESTS_ROOT / "data"
     idf_dir = fixture_dir / "idf"
     target_dir = fixture_dir / "target"
 
@@ -103,7 +106,7 @@ def test_pixel_geometry_targets_match_all_idf_inputs(tmp_path: Path) -> None:
 
 
 def test_preparer_q_matrix_scale_option(tmp_path: Path) -> None:
-    fixture_dir = Path(__file__).parents[1] / "data" / "idf"
+    fixture_dir = TESTS_ROOT / "data" / "idf"
     idf_path = fixture_dir / "NOMAD_Definition.xml"
     pixel_csv = tmp_path / "pixel_geometry_scaled.csv"
     iq_csv = tmp_path / "iq_scaled.csv"
@@ -134,9 +137,9 @@ def test_preparer_q_matrix_scale_option(tmp_path: Path) -> None:
 
 
 def test_preparer_calibration_file_adds_diffcal_and_use_columns(tmp_path: Path) -> None:
-    fixture_dir = Path(__file__).parents[1] / "data" / "idf"
+    fixture_dir = TESTS_ROOT / "data" / "idf"
     idf_path = fixture_dir / "NOMAD_Definition.xml"
-    calibration_file = Path(__file__).parents[1] / "data" / "calibration" / "NOMAD_243451_2026-06-09_shifter.h5"
+    calibration_file = TESTS_ROOT / "data" / "calibration" / "NOMAD_243451_2026-06-09_shifter.h5"
     calibration_by_detector = load_diffraction_calibration(calibration_file)
     rows = build_detector_geometry(idf_path)
     matching_row = next(row for row in rows if row[0] in calibration_by_detector)

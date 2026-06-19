@@ -57,7 +57,7 @@ default-groups = ["dev", "test"]
 [tool.pytest.ini_options]
 addopts = "-v --cov=live_stream_analysis --cov-report=term-missing"
 pythonpath = [".", "src", "scripts"]
-testpaths = ["tests"]
+testpaths = ["tests/unit", "tests/integration"]
 python_files = ["test*.py"]
 norecursedirs = [
   ".git",
@@ -67,7 +67,10 @@ norecursedirs = [
   "*dataset*",
   "*data_set*",
 ]
-markers = ["mymarker: example markers goes here"]
+markers = [
+  "unit: fast unit tests",
+  "integration: tests that exercise SDK/service integration surfaces",
+]
 
 # ------------------ #
 # Ruff configuration #

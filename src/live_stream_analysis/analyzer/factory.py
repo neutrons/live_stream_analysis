@@ -21,6 +21,7 @@ class HistogramSourceRunner(Protocol):
         plotter,
         *,
         chunk_size: int,
+        q_conversion_provider=None,
         histogram_callback=None,
     ): ...
 
@@ -38,6 +39,7 @@ class _AdaraRunner:
         plotter,
         *,
         chunk_size: int,
+        q_conversion_provider=None,
         histogram_callback=None,
     ):
         _ = chunk_size
@@ -51,6 +53,7 @@ class _AdaraRunner:
             plotter=plotter,
             live_plot_refresh_every=args.live_plot_refresh_every,
             event_log_interval=args.event_log_interval,
+            q_conversion_provider=q_conversion_provider,
             histogram_callback=histogram_callback,
         )
 
@@ -70,6 +73,7 @@ class _NexusRunner:
         plotter,
         *,
         chunk_size: int,
+        q_conversion_provider=None,
         histogram_callback=None,
     ):
         return accumulate_nexus_histogram(
@@ -83,6 +87,7 @@ class _NexusRunner:
             live_plot_refresh_every=args.live_plot_refresh_every,
             event_log_interval=args.event_log_interval,
             chunk_size=chunk_size,
+            q_conversion_provider=q_conversion_provider,
             histogram_callback=histogram_callback,
         )
 

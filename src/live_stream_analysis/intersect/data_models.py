@@ -37,3 +37,20 @@ class IntersectConfig(BaseModel):
     hierarchy: dict[str, str] = Field(default_factory=dict)
     broker: dict[str, str | int | bool] = Field(default_factory=dict)
     data_store: dict[str, str | int | bool] = Field(default_factory=dict)
+
+
+class CsvTextRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    csv_text: str = Field(min_length=1)
+
+
+class UpdateResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: str
+    kind: str
+
+
+CsvTextRequest.model_rebuild()
+UpdateResponse.model_rebuild()

@@ -9,8 +9,11 @@ from live_stream_analysis.preparer.instrument import (
 )
 
 
+TESTS_ROOT = Path(__file__).parents[2]
+
+
 def test_build_detector_geometry_for_nomad_and_powgen() -> None:
-    fixture_dir = Path(__file__).parents[1] / "data" / "idf"
+    fixture_dir = TESTS_ROOT / "data" / "idf"
     nomad_rows = build_detector_geometry(fixture_dir / "NOMAD_Definition.xml")
     powgen_rows = build_detector_geometry(fixture_dir / "POWGEN_Definition_2010.xml")
 
@@ -25,7 +28,7 @@ def test_build_detector_geometry_for_nomad_and_powgen() -> None:
 
 
 def test_matrix_element_matches_formula_for_known_nomad_detector() -> None:
-    fixture_dir = Path(__file__).parents[1] / "data" / "idf"
+    fixture_dir = TESTS_ROOT / "data" / "idf"
     idf_path = fixture_dir / "NOMAD_Definition.xml"
     rows = build_detector_geometry(idf_path)
 

@@ -177,11 +177,17 @@ def apply_corrections(
     hist: list[int],
     args: argparse.Namespace,
     histogram_bins: int,
+    runtime_state=None,
 ) -> tuple[list[float], list[float]]:
     corrected = [float(value) for value in hist]
     variance = [float(value) for value in hist]
 
-    if args.background_subtraction is not None:
+    background = None
+    background_error = None
+    if runtime_state is not None and runtime_state.background_values is not None:
+        background = runtime_state.background_values
+        background_error = runtime_state.background_errors or [0.0] * len(background)
+    elif args.background_subtraction is not None:
         background, background_error = load_correction_csv(
             args.background_subtraction,
             expected_bins=histogram_bins,
@@ -189,13 +195,20 @@ def apply_corrections(
             q_min=args.histogram_q_min,
             q_max=args.histogram_q_max,
         )
+
+    if background is not None and background_error is not None:
         corrected = [value - background_value for value, background_value in zip(corrected, background)]
         variance = [
             value_variance + background_sigma**2
             for value_variance, background_sigma in zip(variance, background_error, strict=True)
         ]
 
-    if args.normalization is not None:
+    normalization = None
+    normalization_error = None
+    if runtime_state is not None and runtime_state.normalization_values is not None:
+        normalization = runtime_state.normalization_values
+        normalization_error = runtime_state.normalization_errors or [0.0] * len(normalization)
+    elif args.normalization is not None:
         normalization, normalization_error = load_correction_csv(
             args.normalization,
             expected_bins=histogram_bins,
@@ -203,6 +216,8 @@ def apply_corrections(
             q_min=args.histogram_q_min,
             q_max=args.histogram_q_max,
         )
+
+    if normalization is not None and normalization_error is not None:
         next_corrected: list[float] = []
         next_variance: list[float] = []
         for value, value_variance, norm, norm_sigma in zip(
