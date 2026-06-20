@@ -24,6 +24,29 @@ ADARA_RUN_STATUS_END_RUN = 4
 ADARA_BANKED_EVENT_FORMAT = 0x400001
 
 
+def _safe_packet_attr(packet, attr: str):
+    value = getattr(packet, attr, None)
+    if callable(value):
+        try:
+            return value()
+        except Exception:
+            return '<error>'
+    return value if value is not None else '<missing>'
+
+
+def _is_end_run_status_packet(packet) -> bool:
+    status_getter = getattr(packet, "get_status", None)
+    if status_getter is None:
+        return False
+    try:
+        status = status_getter()
+    except Exception:
+        return False
+    if status != ADARA_RUN_STATUS_END_RUN:
+        return False
+    return AdaraRunStatusPacket is None or isinstance(packet, AdaraRunStatusPacket)
+
+
 @dataclass
 class AdaraHistogramStats:
     packet_count: int = 0
@@ -96,18 +119,29 @@ def accumulate_adara_histogram(
 
     for packet in reader.read_generator():
         stats.packet_count += 1
-        if (
-            run_complete_callback is not None
-            and AdaraRunStatusPacket is not None
-            and isinstance(packet, AdaraRunStatusPacket)
-            and packet.get_status() == ADARA_RUN_STATUS_END_RUN
-        ):
+        if run_complete_callback is not None and _is_end_run_status_packet(packet):
+            maybe_update_live_plot(
+                plotter,
+                hist,
+                [math.sqrt(float(value)) for value in hist],
+                live_plot_refresh_every,
+                stats.packet_count,
+                force=True,
+            )
+            if histogram_callback is not None:
+                histogram_callback(stats.histogram_events, hist)
             LOGGER.info(
-                "Received ADARA end-run status packet after %s packets (%s total source events)",
+                "Received ADARA end-run status packet after %s packets (%s total source events): packet_type=%s status=%s run_number=%s run_start=%s file_number=%s",
                 stats.packet_count,
                 stats.total_events,
+                type(packet).__name__,
+                _safe_packet_attr(packet, 'get_status'),
+                _safe_packet_attr(packet, 'get_run_number'),
+                _safe_packet_attr(packet, 'get_run_start'),
+                _safe_packet_attr(packet, 'get_file_number'),
             )
             run_complete_callback(packet)
+            break
 
         if getattr(packet, "get_format_int", None) is not None:
             if packet.get_format_int() != ADARA_BANKED_EVENT_FORMAT:

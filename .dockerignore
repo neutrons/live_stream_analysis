@@ -11,6 +11,10 @@ dist
 docs/_build
 env
 notebooks
+artifacts/
 nexus_files/
+repos/
+screenshots/
+NOM*
 docker-compose*
 .dockerignore

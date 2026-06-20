@@ -45,6 +45,9 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
     active_hist: list[int] | None = None
     next_snapshot_event_count = max(1, args.histogram_snapshot_every) if args.histogram_snapshot_every > 0 else None
     adara_stats = None
+    packet_count = 0
+    total_events = 0
+    histogram_events = 0
     try:
         LOGGER.info("Starting histogram analysis")
         histogram_bins = validate_histogram_args(args)
@@ -178,28 +181,50 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             nonlocal active_hist
             active_hist = hist
 
-        accumulation_result = runner.accumulate_histogram(
-            reader,
-            args,
-            q_conversion,
-            histogram_bins,
-            plotter,
-            chunk_size=chunk_size,
-            q_conversion_provider=lambda: runtime_state.pixel_q_conversion,
-            histogram_callback=_publish_histogram_snapshot,
-            run_complete_callback=_handle_run_complete,
-            histogram_state_callback=_set_active_hist,
-        )
-        if len(accumulation_result) == 5:
-            packet_count, total_events, histogram_events, hist, adara_stats = accumulation_result
-        elif len(accumulation_result) == 4:
-            packet_count, total_events, histogram_events, hist = accumulation_result
-            adara_stats = None
-        else:
-            raise ValueError(
-                "accumulate_histogram() must return 4 or 5 values "
-                f"(got {len(accumulation_result)})"
+        reconnect_attempts = 0
+        while True:
+            accumulation_result = runner.accumulate_histogram(
+                reader,
+                args,
+                q_conversion,
+                histogram_bins,
+                plotter,
+                chunk_size=chunk_size,
+                q_conversion_provider=lambda: runtime_state.pixel_q_conversion,
+                histogram_callback=_publish_histogram_snapshot,
+                run_complete_callback=_handle_run_complete,
+                histogram_state_callback=_set_active_hist,
             )
+            if len(accumulation_result) == 5:
+                packet_count, total_events, histogram_events, hist, adara_stats = accumulation_result
+            elif len(accumulation_result) == 4:
+                packet_count, total_events, histogram_events, hist = accumulation_result
+                adara_stats = None
+            else:
+                raise ValueError(
+                    "accumulate_histogram() must return 4 or 5 values "
+                    f"(got {len(accumulation_result)})"
+                )
+
+            if args.adara_stream is None or run_completion_handled:
+                break
+
+            reconnect_attempts += 1
+            max_reconnects = args.adara_stream_max_reconnects
+            if max_reconnects >= 0 and reconnect_attempts > max_reconnects:
+                raise OSError(
+                    "ADARA live stream ended before END_RUN and reconnect limit was reached"
+                )
+
+            LOGGER.warning(
+                "ADARA live stream disconnected before END_RUN after %s packets (%s total source events); reconnect attempt %s",
+                packet_count,
+                total_events,
+                reconnect_attempts,
+            )
+            time.sleep(max(0.0, args.adara_stream_reconnect_delay))
+            reader = build_reader(args)
+
         active_hist = hist
         LOGGER.info(
             "Finished event accumulation: packets_or_groups=%s total_events=%s histogrammed_events=%s",

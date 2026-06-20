@@ -126,6 +126,54 @@ def test_accumulate_adara_histogram_calls_run_complete_callback_only_for_end_run
     assert stats.packet_count == 3
 
 
+def test_accumulate_adara_histogram_detects_end_run_from_status_accessor_without_exact_packet_type(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class _ForeignRunStatusPacket(_Packet):
+        def __init__(self, status: int):
+            super().__init__([])
+            self._status = status
+
+        def get_status(self):
+            return self._status
+
+    monkeypatch.setattr("live_stream_analysis.analyzer.adara.AdaraRunStatusPacket", None)
+    reader = _Reader([_Packet([(1, 100)]), _ForeignRunStatusPacket(4)])
+    q_conversion = PixelQConversion(
+        q_matrix_constants=[0.0, 1000.0],
+        difc=[0.0, 1000.0 / (2.0 * 3.141592653589793)],
+        difa=[0.0, 0.0],
+        tzero=[0.0, 0.0],
+        use=[1, 1],
+    )
+    completed_packets: list[_ForeignRunStatusPacket] = []
+    histogram_snapshots: list[tuple[int, list[int]]] = []
+
+    packet_count, total_events, histogram_events, hist, stats = accumulate_adara_histogram(
+        reader=reader,
+        q_conversion=q_conversion,
+        histogram_bins=600,
+        histogram_q_min=0.0,
+        histogram_q_bin_size=0.02,
+        tof_tick_us=1.0,
+        plotter=NullHistogramPlotter(),
+        live_plot_refresh_every=1000,
+        event_log_interval=100_000,
+        histogram_callback=lambda count, current_hist: histogram_snapshots.append((count, list(current_hist))),
+        run_complete_callback=completed_packets.append,
+    )
+
+    assert packet_count == 2
+    assert total_events == 1
+    assert histogram_events == 0
+    assert sum(hist) == 0
+    assert len(completed_packets) == 1
+    assert completed_packets[0].get_status() == 4
+    assert histogram_snapshots[-1][0] == 0
+    assert sum(histogram_snapshots[-1][1]) == 0
+    assert stats.packet_count == 2
+
+
 def test_accumulate_adara_histogram_ignores_non_banked_event_packets():
     reader = _Reader([_Packet([(1, 100)], format_int=0x400000), _Packet([(1, 100)], format_int=0x400001)])
     q_conversion = PixelQConversion(

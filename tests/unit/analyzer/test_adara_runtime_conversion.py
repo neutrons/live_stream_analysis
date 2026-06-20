@@ -46,8 +46,8 @@ def test_accumulate_adara_histogram_uses_conversion_provider():
     def provider():
         return conversions.pop(0)
 
-    packet_count, total_events, histogram_events, hist = accumulate_adara_histogram(
-        reader=_Reader([_Packet([(0, 10.0)]), _Packet([(0, 10.0)])]),
+    packet_count, total_events, histogram_events, hist, stats = accumulate_adara_histogram(
+        reader=_Reader([_Packet([(10.0, 0)]), _Packet([(10.0, 0)])]),
         q_conversion=None,
         histogram_bins=3,
         histogram_q_min=0.0,
@@ -63,3 +63,4 @@ def test_accumulate_adara_histogram_uses_conversion_provider():
     assert total_events == 2
     assert histogram_events == 2
     assert hist == [0, 1, 1]
+    assert stats.packet_count == 2

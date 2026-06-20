@@ -51,6 +51,18 @@ def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         metavar=("HOSTNAME", "PORT"),
         help="Hostname and port of a live ADARA stream (e.g. bl10-daq1 31415).",
     )
+    parser.add_argument(
+        "--adara-stream-reconnect-delay",
+        type=float,
+        default=5.0,
+        help="Seconds to wait before reconnecting after an ADARA live stream disconnect (default: 5.0).",
+    )
+    parser.add_argument(
+        "--adara-stream-max-reconnects",
+        type=int,
+        default=-1,
+        help="Maximum ADARA live stream reconnect attempts after disconnect; use -1 for unlimited (default: -1).",
+    )
 
     parser.add_argument(
         "--enable-intersect",
