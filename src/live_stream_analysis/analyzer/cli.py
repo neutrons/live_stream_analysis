@@ -114,6 +114,15 @@ def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         help="Optional output CSV file with columns: Q value, I(Q), Error I(Q).",
     )
     parser.add_argument(
+        "--histogram-snapshot-every",
+        type=int,
+        default=0,
+        help=(
+            "Optionally write the current corrected histogram CSV every N accepted events while processing. "
+            "Useful for long-running live streams; disabled by default."
+        ),
+    )
+    parser.add_argument(
         "--background-subtraction",
         metavar="FILE",
         help="Optional three-column CSV with Q value, I(Q), Error I(Q) to subtract from the histogrammed signal.",
@@ -122,6 +131,22 @@ def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         "--normalization",
         metavar="FILE",
         help="Optional three-column CSV with Q value, I(Q), Error I(Q) used to normalize the histogrammed signal.",
+    )
+    parser.add_argument(
+        "--sample-coherent-scatter-length",
+        type=float,
+        help=(
+            "Optional average coherent scattering length for the sample in fm. "
+            "When provided with --sample-total-scatter-length-squared, convert corrected intensity to Mantid-style S(Q)."
+        ),
+    )
+    parser.add_argument(
+        "--sample-total-scatter-length-squared",
+        type=float,
+        help=(
+            "Optional average total scattering length squared for the sample in fm^2. "
+            "Used with --sample-coherent-scatter-length to convert corrected intensity to Mantid-style S(Q)."
+        ),
     )
     parser.add_argument(
         "--live-plot-mode",

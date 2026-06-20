@@ -1,3 +1,5 @@
+import argparse
+import csv
 import sys
 import time
 from pathlib import Path
@@ -6,14 +8,55 @@ import matplotlib.pyplot as plt
 import numpy as np
 import readadara
 
-mode = sys.argv[1]
-# Open the text file and read comma-separated numbers into a Python list
 
-with open("/SNS/users/tev/readadara-main/pixel_geometry.txt", "r") as file:
-    content = file.read()
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Legacy Ehsan-style ADARA histogrammer")
+    parser.add_argument("mode", nargs="?", default="w", help="File write mode for legacy text output")
+    parser.add_argument(
+        "--geometry-csv",
+        default="input_files/pixel_geometry.csv",
+        help="Pixel geometry CSV containing 'pixel id' and 'TOF-to-Q matrix element'",
+    )
+    parser.add_argument("--live-stream", nargs=2, metavar=("HOST", "PORT"), help="Read from a live ADARA stream")
+    parser.add_argument("--folder-path", help="Read .adara files from a folder")
+    parser.add_argument(
+        "--max-banked-packets",
+        type=int,
+        default=0,
+        help="Stop after this many banked event packets; 0 means no limit",
+    )
+    parser.add_argument(
+        "--output-csv",
+        default="artifacts/ehsan_live_stream_hist.csv",
+        help="Output CSV path for Q value, I(Q), Error I(Q)",
+    )
+    parser.add_argument(
+        "--output-plot",
+        default="artifacts/ehsan_live_stream_hist.png",
+        help="Output plot path",
+    )
+    return parser.parse_args()
 
-# Convert the comma-separated values into a list of numbers
-q_matrix_constant = [float(x) for x in content.split(",")]
+
+def load_q_matrix_constants(geometry_csv: str) -> list[float]:
+    by_pixel_id: dict[int, float] = {}
+    max_pixel_id = -1
+    with Path(geometry_csv).open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            pixel_id = int(row["pixel id"])
+            by_pixel_id[pixel_id] = float(row["TOF-to-Q matrix element"])
+            max_pixel_id = max(max_pixel_id, pixel_id)
+
+    q_matrix = [0.0] * (max_pixel_id + 1)
+    for pixel_id, value in by_pixel_id.items():
+        q_matrix[pixel_id] = value
+    return q_matrix
+
+
+args = parse_args()
+mode = args.mode
+q_matrix_constant = load_q_matrix_constants(args.geometry_csv)
 
 ## print(f"len(q_matrix_constant): {len(q_matrix_constant)}")
 q_array = []
@@ -26,17 +69,13 @@ event_counter = 0
 
 np.set_printoptions(threshold=np.inf)
 
-## reader = readadara.AdaraLiveStreamReader("bl1B-daq1", 31415)
-## reader = readadara.AdaraFileReader("/Users/tev/Library/CloudStorage/OneDrive-OakRidgeNationalLaboratory/datas/m00000001-f00000001-run-235002.adara") #C:\\Users\\tev\\Downloads\\datas\\m00000001-f00000044-run-235002.adara")
-
-## reader = readadara.AdaraFileReader("/SNS/users/tev/parser/datas/m00000001-f00000048-run-235002.adara") #m00000001-f00000004-run-208616.adara") # parser/datas/m00000001-f00000044-run-235002.adara")
-
-folder_path = "/SNS/users/y8y/NOMAD.Raw.Data.Runs.208511-208543/20250131-125313.244482428-run-208543"  ##"/SNS/users/tev/parser/datas/"
-
-# Get a list of all .adara files in the folder
-adara_files = sorted(Path(folder_path).glob("*.adara"))
-
-reader = readadara.AdaraMultiFileReader(adara_files[0:20])
+if args.live_stream is not None:
+    host, port = args.live_stream
+    reader = readadara.AdaraLiveStreamReader(host, int(port))
+else:
+    folder_path = args.folder_path or "/SNS/users/y8y/NOMAD.Raw.Data.Runs.208511-208543/20250131-125313.244482428-run-208543"
+    adara_files = sorted(Path(folder_path).glob("*.adara"))
+    reader = readadara.AdaraMultiFileReader(adara_files[0:20])
 
 itr = 0
 
@@ -66,8 +105,7 @@ for packet in g:
             # Qx50=(int)(Q*1024)
             # q_array.append(Q)
 
-            ## event_counter = event_counter + 1
-            ##print(f"event counter: {event_counter}")
+            event_counter = event_counter + 1
 
             bram_index = int(Q)
             if 0 <= bram_index < 5000:
@@ -86,8 +124,8 @@ for packet in g:
         ##	break
 
         itr = itr + 1
-        ##if itr == 500:
-        ##	break
+        if args.max_banked_packets > 0 and itr >= args.max_banked_packets:
+            break
 
 end = time.time()
 
@@ -99,8 +137,17 @@ print(f"\nTotal runtime of the program is {end - start} seconds")
 bins = np.arange(5000)
 
 for bram_index in range(5000):
-    with open("bram_values_python_all.txt", mode) as file:
+    with open("bram_values_python_all.txt", mode, encoding="utf-8") as file:
         print(f"Index:{bram_index} - Counts:{hist[bram_index]}", file=file)
+
+output_csv = Path(args.output_csv)
+output_csv.parent.mkdir(parents=True, exist_ok=True)
+with output_csv.open("w", newline="", encoding="utf-8") as handle:
+    writer = csv.writer(handle)
+    writer.writerow(["Q value", "I(Q)", "Error I(Q)"])
+    for bram_index, count in enumerate(hist):
+        q_value = bram_index / 50.0
+        writer.writerow([f"{q_value:.8f}", f"{float(count):.8f}", f"{np.sqrt(float(count)):.8f}"])
 
 
 plt.figure(figsize=(12, 6))
@@ -110,7 +157,9 @@ plt.title("Python Histogram")
 plt.xlabel("Bin")
 plt.ylabel("Counts")
 plt.grid(True)
-plt.savefig("python_plot_cpu_all_3.png", dpi=600, bbox_inches="tight")
+output_plot = Path(args.output_plot)
+output_plot.parent.mkdir(parents=True, exist_ok=True)
+plt.savefig(output_plot, dpi=600, bbox_inches="tight")
 
 plt.show(block=False)
 

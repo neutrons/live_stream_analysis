@@ -46,6 +46,7 @@ class HistogramRuntimeState:
     background_errors: list[float] | None = None
     normalization_values: list[float] | None = None
     normalization_errors: list[float] | None = None
+    correction_bins: int | None = None
     adara_file_read_released: bool = True
     adara_file_read_event: threading.Event = field(default_factory=threading.Event)
 
@@ -67,6 +68,15 @@ class HistogramRuntimeState:
 
     def release_adara_file_read(self) -> None:
         self.configure_adara_file_read_gate(True)
+
+    def validate_correction_length(self, values: list[float], kind: str) -> None:
+        if self.correction_bins is None:
+            self.correction_bins = len(values)
+            return
+        if len(values) != self.correction_bins:
+            raise ValueError(
+                f"{kind} correction CSV has {len(values)} bins but expected {self.correction_bins}"
+            )
 
 
 def _load_correction_from_csv_text(csv_text: str) -> tuple[list[float], list[float]]:
@@ -137,6 +147,7 @@ class LiveStreamAnalysisCapability(IntersectBaseCapabilityImplementation):
     @intersect_message()
     def set_background(self, payload: CsvTextRequest) -> UpdateResponse:
         values, errors = _load_correction_from_csv_text(payload.csv_text)
+        self.runtime_state.validate_correction_length(values, "Background")
         self.runtime_state.background_values = values
         self.runtime_state.background_errors = errors
         return UpdateResponse(status="updated", kind="background")
@@ -144,6 +155,7 @@ class LiveStreamAnalysisCapability(IntersectBaseCapabilityImplementation):
     @intersect_message()
     def set_normalization(self, payload: CsvTextRequest) -> UpdateResponse:
         values, errors = _load_correction_from_csv_text(payload.csv_text)
+        self.runtime_state.validate_correction_length(values, "Normalization")
         self.runtime_state.normalization_values = values
         self.runtime_state.normalization_errors = errors
         return UpdateResponse(status="updated", kind="normalization")

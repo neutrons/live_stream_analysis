@@ -124,3 +124,20 @@ def test_apply_corrections_propagates_background_and_normalization(tmp_path: Pat
 
     assert corrected == [2.5]
     assert error == [pytest.approx(2.2114757516192665)]
+
+
+def test_apply_corrections_can_convert_to_mantid_style_sq():
+    args = argparse.Namespace(
+        background_subtraction=None,
+        normalization=None,
+        histogram_q_min=0.0,
+        histogram_q_bin_size=0.02,
+        histogram_q_max=0.02,
+        sample_coherent_scatter_length=10.0,
+        sample_total_scatter_length_squared=150.0,
+    )
+
+    corrected, error = apply_corrections([9], args, histogram_bins=1)
+
+    assert corrected == [pytest.approx(8.5)]
+    assert error == [pytest.approx(3.0)]

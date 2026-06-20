@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import logging
 import math
 
@@ -14,12 +15,26 @@ except ImportError:  # pragma: no cover
     AdaraLiveStreamReader = None
     AdaraRunStatusPacket = None
 
-from .histogram import PixelQConversion, pixel_tof_to_q
+from .histogram import PixelQConversion
 from .live_plot import HistogramPlotter, maybe_update_live_plot
 
 LOGGER = logging.getLogger(__name__)
 
 ADARA_RUN_STATUS_END_RUN = 4
+ADARA_BANKED_EVENT_FORMAT = 0x400001
+
+
+@dataclass
+class AdaraHistogramStats:
+    packet_count: int = 0
+    total_events: int = 0
+    histogram_events: int = 0
+    skipped_non_banked_packets: int = 0
+    skipped_invalid_pixel_ids: int = 0
+    skipped_zero_or_negative_tof: int = 0
+    skipped_masked_pixels: int = 0
+    skipped_unconvertible_events: int = 0
+    skipped_out_of_range_bins: int = 0
 
 
 def build_reader(args: argparse.Namespace):
@@ -68,59 +83,89 @@ def accumulate_adara_histogram(
     histogram_callback=None,
     run_complete_callback=None,
     histogram_state_callback=None,
-) -> tuple[int, int, int, list[int]]:
-    packet_count = 0
-    total_events = 0
-    histogram_events = 0
+) -> tuple[int, int, int, list[int], AdaraHistogramStats]:
+    stats = AdaraHistogramStats()
     hist = [0] * histogram_bins
+    if histogram_q_bin_size <= 0.0:
+        raise ValueError("histogram_q_bin_size must be > 0")
+    q_index_scale = 1.0 / histogram_q_bin_size
     if histogram_state_callback is not None:
         histogram_state_callback(hist)
     event_log_interval = max(1, event_log_interval)
     next_event_log = event_log_interval
 
     for packet in reader.read_generator():
-        packet_count += 1
+        stats.packet_count += 1
         if (
             run_complete_callback is not None
             and AdaraRunStatusPacket is not None
             and isinstance(packet, AdaraRunStatusPacket)
             and packet.get_status() == ADARA_RUN_STATUS_END_RUN
         ):
+            LOGGER.info(
+                "Received ADARA end-run status packet after %s packets (%s total source events)",
+                stats.packet_count,
+                stats.total_events,
+            )
             run_complete_callback(packet)
-        events = packet.get_events()
-        total_events += len(events)
 
-        for pixel_id, tof in events:
+        if getattr(packet, "get_format_int", None) is not None:
+            if packet.get_format_int() != ADARA_BANKED_EVENT_FORMAT:
+                stats.skipped_non_banked_packets += 1
+                continue
+
+        events = packet.get_events()
+        stats.total_events += len(events)
+
+        for tof, pixel_id in events:
+
             active_q_conversion = q_conversion_provider() if q_conversion_provider is not None else q_conversion
             if active_q_conversion is None:
                 continue
-            q = pixel_tof_to_q(active_q_conversion, pixel_id, float(tof) * tof_tick_us)
-            if q is None:
+
+            if pixel_id < 0 or pixel_id >= len(active_q_conversion.q_matrix_constants):
+                stats.skipped_invalid_pixel_ids += 1
                 continue
-            bram_index = int((q - histogram_q_min) / histogram_q_bin_size)
+
+            if float(tof) <= 0.0:
+                stats.skipped_zero_or_negative_tof += 1
+                continue
+
+            if active_q_conversion.use[pixel_id] <= 0:
+                stats.skipped_masked_pixels += 1
+                continue
+
+            q = (active_q_conversion.q_matrix_constants[pixel_id] * tof_tick_us) / float(tof)
+            if q <= 0.0:
+                stats.skipped_unconvertible_events += 1
+                continue
+            bram_index = int((q - histogram_q_min) * q_index_scale)
+
             if 0 <= bram_index < histogram_bins:
                 hist[bram_index] += 1
-                histogram_events += 1
-                if histogram_events >= next_event_log:
+                stats.histogram_events += 1
+                if stats.histogram_events >= next_event_log:
                     LOGGER.info(
                         "Histogrammed %s events after %s packets (%s total source events)",
-                        histogram_events,
-                        packet_count,
-                        total_events,
+                        stats.histogram_events,
+                        stats.packet_count,
+                        stats.total_events,
                     )
                     next_event_log += event_log_interval
+            else:
+                stats.skipped_out_of_range_bins += 1
 
         maybe_update_live_plot(
             plotter,
             hist,
             [math.sqrt(float(value)) for value in hist],
             live_plot_refresh_every,
-            packet_count,
+            stats.packet_count,
         )
         if histogram_callback is not None:
-            histogram_callback(packet_count, hist)
+            histogram_callback(stats.histogram_events, hist)
 
-    return packet_count, total_events, histogram_events, hist
+    return stats.packet_count, stats.total_events, stats.histogram_events, hist, stats
 
 
 def run_basic_mode(reader) -> int:
@@ -140,4 +185,4 @@ def run_basic_mode(reader) -> int:
     return 0
 
 
-__all__ = ["accumulate_adara_histogram", "build_reader", "run_basic_mode"]
+__all__ = ["AdaraHistogramStats", "accumulate_adara_histogram", "build_reader", "run_basic_mode"]

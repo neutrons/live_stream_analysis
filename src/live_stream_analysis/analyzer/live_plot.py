@@ -259,59 +259,743 @@ def _browser_plot_html() -> str:
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
     <title>Live Histogram</title>
     <script src=\"https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js\"></script>
+    <script src=\"https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js\"></script>
     <style>
-        body { font-family: Georgia, serif; margin: 0; padding: 24px; background: linear-gradient(180deg, #f7f3ea, #fffdf8); color: #1f1a14; }
-        h1 { margin: 0 0 8px; font-size: 2rem; }
-        p { margin: 0 0 16px; }
-        .panel { background: rgba(255,255,255,0.85); border: 1px solid #d8cdbd; border-radius: 16px; padding: 16px; margin-bottom: 16px; box-shadow: 0 10px 30px rgba(80, 55, 20, 0.08); }
-        .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
-        .status-card { background: rgba(247, 243, 234, 0.9); border: 1px solid #e7dccb; border-radius: 12px; padding: 12px 14px; }
-        .status-label { display: block; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: #7c5d37; margin-bottom: 6px; }
-        .status-value { font-size: 1.35rem; font-weight: 700; }
-        canvas { width: 100%; height: 320px; }
-        #status { font-weight: 600; }
+        :root {
+            --page-bg: #eef2f5;
+            --panel-bg: #ffffff;
+            --panel-border: #cfd8e3;
+            --banner-bg: linear-gradient(90deg, #1f5f3b 0%, #2f7a4a 52%, #5a9a67 100%);
+            --banner-accent: #d7e8b6;
+            --text-main: #1f2d3d;
+            --text-muted: #5f6f82;
+            --crumb-bg: #dfe7ef;
+            --metric-bg: #f7fafc;
+            --metric-border: #d8e2ec;
+            --plot-bg: #e5ecf6;
+            --line-primary: #1f77b4;
+            --line-secondary: #d95f02;
+            --shadow: 0 12px 28px rgba(16, 42, 67, 0.08);
+        }
+
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            background: radial-gradient(circle at top, #f8fbfd 0%, var(--page-bg) 42%, #e7edf3 100%);
+            color: var(--text-main);
+            font-family: Arial, Helvetica, sans-serif;
+        }
+
+        a { color: #0f5f9a; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        .banner {
+            position: relative;
+            padding: 18px 28px 22px;
+            background: var(--banner-bg);
+            color: #fff;
+            border-bottom: 4px solid var(--banner-accent);
+            box-shadow: 0 8px 24px rgba(13, 42, 69, 0.22);
+        }
+
+        .banner::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(120deg, rgba(255,255,255,0.08), transparent 35%, transparent 65%, rgba(255,255,255,0.06));
+            pointer-events: none;
+        }
+
+        .banner-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .banner-mark {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 0.9rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: rgba(244, 250, 240, 0.9);
+        }
+
+        .mark-badge {
+            width: 42px;
+            height: 42px;
+            border-radius: 50%;
+            display: grid;
+            place-items: center;
+            background: rgba(235, 245, 228, 0.18);
+            border: 1px solid rgba(235, 245, 228, 0.34);
+            font-weight: 700;
+            color: #f3f8ee;
+        }
+
+        .banner-title {
+            margin: 18px 0 4px;
+            position: relative;
+            z-index: 1;
+            font-size: clamp(2rem, 4vw, 2.8rem);
+            font-weight: 700;
+            letter-spacing: 0.01em;
+        }
+
+        .banner-subtitle {
+            position: relative;
+            z-index: 1;
+            margin: 0;
+            max-width: 900px;
+            color: rgba(243, 248, 238, 0.9);
+            font-size: 1rem;
+        }
+
+        .breadcrumbs {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            flex-wrap: wrap;
+            padding: 12px 28px;
+            background: var(--crumb-bg);
+            border-bottom: 1px solid #c8d4df;
+            color: #31465a;
+            font-size: 0.95rem;
+        }
+
+        .page {
+            max-width: 1760px;
+            margin: 0 auto;
+            padding: 24px 24px 40px;
+        }
+
+        .summary {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 10px;
+            box-shadow: var(--shadow);
+            padding: 22px;
+            margin-bottom: 18px;
+        }
+
+        .summary-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            align-items: start;
+            flex-wrap: wrap;
+            margin-bottom: 18px;
+        }
+
+        .summary-title {
+            margin: 0;
+            font-size: 1.45rem;
+            font-weight: 700;
+        }
+
+        .summary-note {
+            margin: 6px 0 0;
+            color: var(--text-muted);
+        }
+
+        .run-state {
+            padding: 10px 14px;
+            border-radius: 999px;
+            background: #edf6ee;
+            color: #2f6b3b;
+            border: 1px solid #cfe4d2;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+        }
+
+        .metric {
+            background: var(--metric-bg);
+            border: 1px solid var(--metric-border);
+            border-radius: 8px;
+            padding: 14px 16px;
+        }
+
+        .metric-label {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--text-muted);
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-weight: 700;
+        }
+
+        .metric-value {
+            display: block;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #17324d;
+        }
+
+        .layout {
+            display: grid;
+            grid-template-columns: minmax(0, 3.4fr) minmax(260px, 0.8fr);
+            gap: 18px;
+            align-items: start;
+        }
+
+        .panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 10px;
+            box-shadow: var(--shadow);
+            overflow: hidden;
+        }
+
+        .panel-header {
+            padding: 14px 18px;
+            border-bottom: 1px solid #d9e2eb;
+            background: linear-gradient(180deg, #fbfdff 0%, #f1f6fb 100%);
+        }
+
+        .panel-kicker {
+            display: block;
+            color: #6b7f92;
+            font-size: 0.76rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .panel-title {
+            margin: 0;
+            font-size: 1.15rem;
+        }
+
+        .panel-copy {
+            margin: 4px 0 0;
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        .panel-body {
+            padding: 16px 18px 18px;
+        }
+
+        .chart-shell {
+            background: linear-gradient(180deg, #f9fbfd 0%, #f2f6fb 100%);
+            border: 1px solid #dce5ef;
+            border-radius: 8px;
+            padding: 12px;
+            height: 420px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .chart-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+
+        .chart-hint {
+            color: var(--text-muted);
+            font-size: 0.82rem;
+        }
+
+        .chart-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .chart-reset {
+            border: 1px solid #b8c7d8;
+            background: #f7fafc;
+            color: #24415c;
+            border-radius: 999px;
+            padding: 7px 12px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .chart-reset:hover {
+            background: #edf3f8;
+        }
+
+        canvas {
+            width: 100% !important;
+            height: 100% !important;
+            display: block;
+            flex: 1 1 auto;
+            min-height: 0;
+        }
+
+        .stack {
+            display: grid;
+            gap: 18px;
+        }
+
+        .detail-list {
+            display: grid;
+            gap: 12px;
+        }
+
+        .detail-row {
+            padding-bottom: 12px;
+            border-bottom: 1px solid #e3eaf1;
+        }
+
+        .detail-row:last-child {
+            padding-bottom: 0;
+            border-bottom: 0;
+        }
+
+        .detail-label {
+            display: block;
+            color: var(--text-muted);
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .detail-value {
+            font-size: 1rem;
+            line-height: 1.45;
+        }
+
+        .status-live { color: #2f6b3b; }
+        .status-complete { color: #7a4b00; }
+
+        @media (max-width: 980px) {
+            .layout { grid-template-columns: 1fr; }
+            .page { padding: 18px 14px 28px; }
+            .banner, .breadcrumbs { padding-left: 16px; padding-right: 16px; }
+        }
     </style>
 </head>
 <body>
-    <h1>Live Histogram</h1>
-    <p id=\"status\">Waiting for data...</p>
-    <div class=\"status-grid\">
-        <div class=\"status-card\"><span class=\"status-label\">Plot updates</span><span class=\"status-value\" id=\"update-count\">0</span></div>
-        <div class=\"status-card\"><span class=\"status-label\">Total counts</span><span class=\"status-value\" id=\"total-counts\">0</span></div>
-        <div class=\"status-card\"><span class=\"status-label\">Nonzero bins</span><span class=\"status-value\" id=\"nonzero-bins\">0</span></div>
-        <div class=\"status-card\"><span class=\"status-label\">Peak I(Q)</span><span class=\"status-value\" id=\"max-intensity\">0</span></div>
-        <div class=\"status-card\"><span class=\"status-label\">Mean sigma / I(Q)</span><span class=\"status-value\" id=\"mean-relative-uncertainty\">0</span></div>
+    <header class=\"banner\">
+        <div class=\"banner-top\">
+            <div class=\"banner-mark\">
+                <span class=\"mark-badge\">N</span>
+                <span>Spallation Neutron Source</span>
+            </div>
+            <div>Live reduction monitor</div>
+        </div>
+        <h1 class=\"banner-title\">NOM Live Histogram</h1>
+        <p class=\"banner-subtitle\">A browser-based monitoring view styled after the NOM run report, with live I(Q) and relative uncertainty updates from the analyzer.</p>
+    </header>
+
+    <div class=\"breadcrumbs\">
+        <div>
+            <a href=\"#\">home</a> &#8250; <a href=\"#\">nom</a> &#8250; <a href=\"#\">live monitor</a> &#8250; histogram
+        </div>
+        <div>status: <strong id=\"status\" class=\"status-live\">Waiting for data...</strong></div>
     </div>
-    <div class=\"panel\"><canvas id=\"intensity\"></canvas></div>
-    <div class=\"panel\"><canvas id=\"relative\"></canvas></div>
+
+    <main class=\"page\">
+        <section class=\"summary\">
+            <div class=\"summary-header\">
+                <div>
+                    <h2 class=\"summary-title\">Run Summary</h2>
+                    <p class=\"summary-note\">Live histogram telemetry for the current analyzer session.</p>
+                </div>
+                <div class=\"run-state\" id=\"run-state\">Streaming</div>
+            </div>
+            <div class=\"metrics\">
+                <div class=\"metric\"><span class=\"metric-label\">Plot updates</span><span class=\"metric-value\" id=\"update-count\">0</span></div>
+                <div class=\"metric\"><span class=\"metric-label\">Total counts</span><span class=\"metric-value\" id=\"total-counts\">0</span></div>
+                <div class=\"metric\"><span class=\"metric-label\">Nonzero bins</span><span class=\"metric-value\" id=\"nonzero-bins\">0</span></div>
+                <div class=\"metric\"><span class=\"metric-label\">Peak I(Q)</span><span class=\"metric-value\" id=\"max-intensity\">0</span></div>
+                <div class=\"metric\"><span class=\"metric-label\">Mean sigma / I(Q)</span><span class=\"metric-value\" id=\"mean-relative-uncertainty\">0</span></div>
+            </div>
+        </section>
+
+        <section class=\"layout\">
+            <div class=\"stack\">
+                <section class=\"panel\">
+                    <div class=\"panel-header\">
+                        <span class=\"panel-kicker\">MTS Reduction</span>
+                        <h3 class=\"panel-title\">Live I(Q)</h3>
+                        <p class=\"panel-copy\">Primary histogram intensity across Q bins.</p>
+                    </div>
+                    <div class=\"panel-body\">
+                        <div class=\"chart-shell\">
+                            <div class=\"chart-toolbar\">
+                                <span class=\"chart-hint\">Use the controls to zoom and pan along Q.</span>
+                                <div class=\"chart-actions\">
+                                    <button class=\"chart-reset\" type=\"button\" id=\"zoom-in-intensity\">Zoom in</button>
+                                    <button class=\"chart-reset\" type=\"button\" id=\"zoom-out-intensity\">Zoom out</button>
+                                    <button class=\"chart-reset\" type=\"button\" id=\"pan-left-intensity\">Pan left</button>
+                                    <button class=\"chart-reset\" type=\"button\" id=\"pan-right-intensity\">Pan right</button>
+                                    <button class=\"chart-reset\" type=\"button\" id=\"reset-intensity\">Reset view</button>
+                                </div>
+                            </div>
+                            <canvas id=\"intensity\"></canvas>
+                        </div>
+                    </div>
+                </section>
+
+                <section class=\"panel\">
+                    <div class=\"panel-header\">
+                        <span class=\"panel-kicker\">Quality Monitor</span>
+                        <h3 class=\"panel-title\">Relative Uncertainty</h3>
+                        <p class=\"panel-copy\">Per-bin $\sigma / I(Q)$ trend for the current live histogram.</p>
+                    </div>
+                    <div class=\"panel-body\">
+                        <div class=\"chart-shell\">
+                            <div class=\"chart-toolbar\">
+                                <span class=\"chart-hint\">Use the controls to zoom and pan along Q.</span>
+                                <div class=\"chart-actions\">
+                                    <button class=\"chart-reset\" type=\"button\" id=\"zoom-in-relative\">Zoom in</button>
+                                    <button class=\"chart-reset\" type=\"button\" id=\"zoom-out-relative\">Zoom out</button>
+                                    <button class=\"chart-reset\" type=\"button\" id=\"pan-left-relative\">Pan left</button>
+                                    <button class=\"chart-reset\" type=\"button\" id=\"pan-right-relative\">Pan right</button>
+                                    <button class=\"chart-reset\" type=\"button\" id=\"reset-relative\">Reset view</button>
+                                </div>
+                            </div>
+                            <canvas id=\"relative\"></canvas>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <aside class=\"stack\">
+                <section class=\"panel\">
+                    <div class=\"panel-header\">
+                        <span class=\"panel-kicker\">Session Details</span>
+                        <h3 class=\"panel-title\">Monitor State</h3>
+                    </div>
+                    <div class=\"panel-body detail-list\">
+                        <div class=\"detail-row\">
+                            <span class=\"detail-label\">Current mode</span>
+                            <div class=\"detail-value\">Browser live plot</div>
+                        </div>
+                        <div class=\"detail-row\">
+                            <span class=\"detail-label\">Update cadence</span>
+                            <div class=\"detail-value\">500 ms polling from local analyzer state</div>
+                        </div>
+                        <div class=\"detail-row\">
+                            <span class=\"detail-label\">Q coverage</span>
+                            <div class=\"detail-value\" id=\"q-range\">Waiting for data...</div>
+                        </div>
+                        <div class=\"detail-row\">
+                            <span class=\"detail-label\">Histogram bins</span>
+                            <div class=\"detail-value\" id=\"bin-count\">0</div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class=\"panel\">
+                    <div class=\"panel-header\">
+                        <span class=\"panel-kicker\">Interpretation</span>
+                        <h3 class=\"panel-title\">What To Watch</h3>
+                    </div>
+                    <div class=\"panel-body detail-list\">
+                        <div class=\"detail-row\">
+                            <span class=\"detail-label\">Intensity panel</span>
+                            <div class=\"detail-value\">Tracks the live corrected histogram shape as events accumulate.</div>
+                        </div>
+                        <div class=\"detail-row\">
+                            <span class=\"detail-label\">Uncertainty panel</span>
+                            <div class=\"detail-value\">Highlights sparse or unstable regions where relative error remains elevated.</div>
+                        </div>
+                        <div class=\"detail-row\">
+                            <span class=\"detail-label\">Completion state</span>
+                            <div class=\"detail-value\">The banner switches from streaming to complete when the analyzer closes the session.</div>
+                        </div>
+                    </div>
+                </section>
+            </aside>
+        </section>
+    </main>
     <script>
+        const plotBackground = getComputedStyle(document.documentElement).getPropertyValue('--plot-bg').trim();
+        const primaryLine = getComputedStyle(document.documentElement).getPropertyValue('--line-primary').trim();
+        const secondaryLine = getComputedStyle(document.documentElement).getPropertyValue('--line-secondary').trim();
+
+        Chart.register(ChartZoom);
+
+        function integerTickFormatter(value) {
+            return Math.trunc(Number(value));
+        }
+
+        function toSeries(xValues, yValues) {
+            return xValues.map((xValue, index) => ({ x: xValue, y: yValues[index] ?? 0 }));
+        }
+
+        function toLogSafeSeries(xValues, yValues) {
+            return xValues.map((xValue, index) => ({ x: xValue, y: Math.max(yValues[index] ?? 0, 1e-6) }));
+        }
+
+        function computeLogYAxisBounds(series) {
+            const yValues = series.map((point) => point.y).filter((value) => Number.isFinite(value) && value > 0);
+            if (!yValues.length) {
+                return { min: 1e-6, max: 1 };
+            }
+            const dataMin = Math.min(...yValues);
+            const dataMax = Math.max(...yValues);
+            const min = Math.max(1e-6, dataMin / 1.35);
+            const max = Math.max(min * 1.5, dataMax * 1.08);
+            return { min, max };
+        }
+
+        function initializeXAxisBounds(chart, qValues) {
+            if (!qValues.length || chart.$liveBoundsInitialized) {
+                return;
+            }
+            chart.$liveOriginalXBounds = {
+                min: qValues[0],
+                max: qValues[qValues.length - 1],
+            };
+            chart.$liveBoundsInitialized = true;
+        }
+
+        function resetXAxisBounds(chart) {
+            const bounds = chart.$liveOriginalXBounds;
+            if (!bounds) {
+                chart.resetZoom();
+                return;
+            }
+            chart.zoomScale('x', bounds, 'default');
+        }
+
+        function zoomXAxis(chart, factor) {
+            const scale = chart.scales.x;
+            const bounds = chart.$liveOriginalXBounds;
+            if (!scale || !bounds) {
+                return;
+            }
+            const currentMin = scale.min;
+            const currentMax = scale.max;
+            const center = (currentMin + currentMax) / 2;
+            const halfRange = ((currentMax - currentMin) * factor) / 2;
+            const nextMin = Math.max(bounds.min, center - halfRange);
+            const nextMax = Math.min(bounds.max, center + halfRange);
+            chart.zoomScale('x', { min: nextMin, max: nextMax }, 'default');
+        }
+
+        function panXAxis(chart, fraction) {
+            const scale = chart.scales.x;
+            const bounds = chart.$liveOriginalXBounds;
+            if (!scale || !bounds) {
+                return;
+            }
+            const currentMin = scale.min;
+            const currentMax = scale.max;
+            const range = currentMax - currentMin;
+            const delta = range * fraction;
+            let nextMin = currentMin + delta;
+            let nextMax = currentMax + delta;
+            if (nextMin < bounds.min) {
+                nextMax += bounds.min - nextMin;
+                nextMin = bounds.min;
+            }
+            if (nextMax > bounds.max) {
+                nextMin -= nextMax - bounds.max;
+                nextMax = bounds.max;
+            }
+            chart.zoomScale('x', { min: nextMin, max: nextMax }, 'default');
+        }
+
+        function zoomPluginOptions() {
+            return {
+                limits: {
+                    x: { min: 'original', max: 'original' },
+                },
+                pan: {
+                    enabled: true,
+                    mode: 'x',
+                    modifierKey: 'shift',
+                },
+                zoom: {
+                    wheel: { enabled: false },
+                    pinch: { enabled: false },
+                    drag: {
+                        enabled: true,
+                        backgroundColor: 'rgba(31, 95, 59, 0.12)',
+                        borderColor: 'rgba(31, 95, 59, 0.35)',
+                        borderWidth: 1,
+                    },
+                    mode: 'x',
+                },
+            };
+        }
+
         const intensityChart = new Chart(document.getElementById('intensity'), {
             type: 'line',
-            data: { labels: [], datasets: [{ label: 'I(Q)', data: [], borderColor: '#0f766e', pointRadius: 0, borderWidth: 1.5 }] },
-            options: { animation: false, responsive: true, scales: { x: { title: { display: true, text: 'Q' } }, y: { title: { display: true, text: 'I(Q)' } } } }
+            data: {
+                datasets: [{
+                    label: 'I(Q)',
+                    data: [],
+                    borderColor: primaryLine,
+                    backgroundColor: 'rgba(31, 119, 180, 0.12)',
+                    pointRadius: 0,
+                    borderWidth: 1.8,
+                    tension: 0.08,
+                    fill: false,
+                }],
+            },
+            options: {
+                animation: false,
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { labels: { color: '#29435c', boxWidth: 14 } },
+                    zoom: zoomPluginOptions(),
+                },
+                scales: {
+                    x: {
+                        type: 'linear',
+                        title: { display: true, text: 'Q', color: '#29435c', font: { weight: '700' } },
+                        ticks: { color: '#4f6478', maxTicksLimit: 10, callback: integerTickFormatter },
+                        grid: { color: 'rgba(120, 144, 168, 0.18)' },
+                    },
+                    y: {
+                        type: 'logarithmic',
+                        title: { display: true, text: 'I(Q)', color: '#29435c', font: { weight: '700' } },
+                        ticks: { color: '#4f6478' },
+                        grid: { color: 'rgba(120, 144, 168, 0.18)' },
+                    },
+                },
+                layout: { padding: { left: 6, right: 10, top: 8, bottom: 4 } },
+            }
         });
         const relativeChart = new Chart(document.getElementById('relative'), {
             type: 'line',
-            data: { labels: [], datasets: [{ label: 'sigma / I(Q)', data: [], borderColor: '#b45309', pointRadius: 0, borderWidth: 1.5 }] },
-            options: { animation: false, responsive: true, scales: { x: { title: { display: true, text: 'Q' } }, y: { title: { display: true, text: 'sigma / I(Q)' } } } }
+            data: {
+                datasets: [{
+                    label: 'sigma / I(Q)',
+                    data: [],
+                    borderColor: secondaryLine,
+                    backgroundColor: 'rgba(217, 95, 2, 0.12)',
+                    pointRadius: 0,
+                    borderWidth: 1.8,
+                    tension: 0.08,
+                    fill: false,
+                }],
+            },
+            options: {
+                animation: false,
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { labels: { color: '#29435c', boxWidth: 14 } },
+                    zoom: zoomPluginOptions(),
+                },
+                scales: {
+                    x: {
+                        type: 'linear',
+                        title: { display: true, text: 'Q', color: '#29435c', font: { weight: '700' } },
+                        ticks: { color: '#4f6478', maxTicksLimit: 10, callback: integerTickFormatter },
+                        grid: { color: 'rgba(120, 144, 168, 0.18)' },
+                    },
+                    y: {
+                        title: { display: true, text: 'sigma / I(Q)', color: '#29435c', font: { weight: '700' } },
+                        ticks: { color: '#4f6478' },
+                        grid: { color: 'rgba(120, 144, 168, 0.18)' },
+                    },
+                },
+                layout: { padding: { left: 6, right: 10, top: 8, bottom: 4 } },
+            }
         });
 
+        intensityChart.canvas.parentNode.style.background = plotBackground;
+        relativeChart.canvas.parentNode.style.background = plotBackground;
+
+        let interactionDepth = 0;
+
+        function beginChartInteraction() {
+            interactionDepth += 1;
+        }
+
+        function endChartInteraction() {
+            interactionDepth = Math.max(0, interactionDepth - 1);
+        }
+
+        function registerInteractionGuards(chart) {
+            const canvas = chart.canvas;
+            canvas.addEventListener('pointerdown', beginChartInteraction);
+            canvas.addEventListener('pointerup', endChartInteraction);
+            canvas.addEventListener('pointercancel', endChartInteraction);
+            canvas.addEventListener('pointerleave', endChartInteraction);
+            canvas.addEventListener('wheel', beginChartInteraction, { passive: true });
+            canvas.addEventListener('wheel', () => {
+                window.setTimeout(endChartInteraction, 250);
+            }, { passive: true });
+        }
+
+        registerInteractionGuards(intensityChart);
+        registerInteractionGuards(relativeChart);
+
+        document.getElementById('zoom-in-intensity').addEventListener('click', () => zoomXAxis(intensityChart, 0.5));
+        document.getElementById('zoom-out-intensity').addEventListener('click', () => zoomXAxis(intensityChart, 2));
+        document.getElementById('pan-left-intensity').addEventListener('click', () => panXAxis(intensityChart, -0.2));
+        document.getElementById('pan-right-intensity').addEventListener('click', () => panXAxis(intensityChart, 0.2));
+        document.getElementById('reset-intensity').addEventListener('click', () => resetXAxisBounds(intensityChart));
+        document.getElementById('zoom-in-relative').addEventListener('click', () => zoomXAxis(relativeChart, 0.5));
+        document.getElementById('zoom-out-relative').addEventListener('click', () => zoomXAxis(relativeChart, 2));
+        document.getElementById('pan-left-relative').addEventListener('click', () => panXAxis(relativeChart, -0.2));
+        document.getElementById('pan-right-relative').addEventListener('click', () => panXAxis(relativeChart, 0.2));
+        document.getElementById('reset-relative').addEventListener('click', () => resetXAxisBounds(relativeChart));
+
+        function formatRange(values) {
+            if (!values.length) {
+                return 'Waiting for data...';
+            }
+            const first = values[0];
+            const last = values[values.length - 1];
+            return `${first.toFixed(2)} to ${last.toFixed(2)}`;
+        }
+
         async function refresh() {
+            if (interactionDepth > 0) {
+                return;
+            }
             const response = await fetch('/state', { cache: 'no-store' });
             const payload = await response.json();
             const status = payload.status;
-            intensityChart.data.labels = payload.q_values;
-            intensityChart.data.datasets[0].data = payload.intensity;
+            const intensitySeries = toLogSafeSeries(payload.q_values, payload.intensity);
+            const relativeSeries = toSeries(payload.q_values, payload.relative_uncertainty);
+            const intensityBounds = computeLogYAxisBounds(intensitySeries);
+            initializeXAxisBounds(intensityChart, payload.q_values);
+            intensityChart.data.datasets[0].data = intensitySeries;
+            intensityChart.options.scales.y.min = intensityBounds.min;
+            intensityChart.options.scales.y.max = intensityBounds.max;
             intensityChart.update('none');
-            relativeChart.data.labels = payload.q_values;
-            relativeChart.data.datasets[0].data = payload.relative_uncertainty;
+            initializeXAxisBounds(relativeChart, payload.q_values);
+            relativeChart.data.datasets[0].data = relativeSeries;
             relativeChart.update('none');
-            document.getElementById('status').textContent = payload.closed ? 'Analysis complete.' : 'Streaming updates...';
+            const statusElement = document.getElementById('status');
+            const runStateElement = document.getElementById('run-state');
+            const isClosed = payload.closed;
+            statusElement.textContent = isClosed ? 'Analysis complete' : 'Streaming updates';
+            statusElement.className = isClosed ? 'status-complete' : 'status-live';
+            runStateElement.textContent = isClosed ? 'Complete' : 'Streaming';
+            runStateElement.style.background = isClosed ? '#fff4e5' : '#edf6ee';
+            runStateElement.style.borderColor = isClosed ? '#f0d3a6' : '#cfe4d2';
+            runStateElement.style.color = isClosed ? '#8a5a00' : '#2f6b3b';
             document.getElementById('update-count').textContent = status.update_count.toLocaleString();
             document.getElementById('total-counts').textContent = status.total_counts.toLocaleString(undefined, { maximumFractionDigits: 0 });
             document.getElementById('nonzero-bins').textContent = status.nonzero_bins.toLocaleString();
             document.getElementById('max-intensity').textContent = status.max_intensity.toLocaleString(undefined, { maximumFractionDigits: 2 });
             document.getElementById('mean-relative-uncertainty').textContent = status.mean_relative_uncertainty.toLocaleString(undefined, { maximumFractionDigits: 4 });
+            document.getElementById('q-range').textContent = formatRange(payload.q_values);
+            document.getElementById('bin-count').textContent = payload.q_values.length.toLocaleString();
         }
 
         refresh();

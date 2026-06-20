@@ -78,7 +78,7 @@ def accumulate_nexus_histogram(
     chunk_size: int = DEFAULT_NEXUS_CHUNK_SIZE,
     q_conversion_provider=None,
     histogram_callback=None,
-) -> tuple[int, int, int, list[int]]:
+) -> tuple[int, int, int, list[int], None]:
     packet_count = 0
     total_events = 0
     histogram_events = 0
@@ -107,9 +107,9 @@ def accumulate_nexus_histogram(
                             processed_chunks,
                         )
                         if histogram_callback is not None:
-                            histogram_callback(processed_chunks, hist)
+                            histogram_callback(histogram_events, hist)
                         continue
-                    for pixel_id, tof in zip(event_ids.tolist(), event_tof.tolist(), strict=True):
+                    for pixel_id, tof in zip(event_ids, event_tof, strict=True):
                         q = pixel_tof_to_q(active_q_conversion, pixel_id, float(tof) * tof_tick_us)
                         if q is None:
                             continue
@@ -136,11 +136,11 @@ def accumulate_nexus_histogram(
                         processed_chunks,
                     )
                     if histogram_callback is not None:
-                        histogram_callback(processed_chunks, hist)
+                        histogram_callback(histogram_events, hist)
 
     finish_nexus_progress(total_chunks)
 
-    return packet_count, total_events, histogram_events, hist
+    return packet_count, total_events, histogram_events, hist, None
 
 
 def run_basic_mode(nexus_files: list[str], *, chunk_size: int = DEFAULT_NEXUS_CHUNK_SIZE) -> int:

@@ -4,6 +4,7 @@ import argparse
 
 from live_stream_analysis.analyzer.histogram import PixelQConversion, apply_corrections, pixel_tof_to_q
 from live_stream_analysis.intersect.service import HistogramRuntimeState
+import pytest
 
 
 def test_apply_corrections_prefers_runtime_state_over_cli_paths():
@@ -52,3 +53,10 @@ def test_runtime_state_can_block_and_release_adara_file_read():
     runtime_state.release_adara_file_read()
 
     assert runtime_state.wait_for_adara_file_read_release(timeout=0.0) is True
+
+
+def test_runtime_state_rejects_corrections_that_do_not_match_histogram_bins():
+    runtime_state = HistogramRuntimeState(correction_bins=1475)
+
+    with pytest.raises(ValueError, match="Background correction CSV has 1 bins but expected 1475"):
+        runtime_state.validate_correction_length([0.0], "Background")

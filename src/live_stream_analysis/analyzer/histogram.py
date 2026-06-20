@@ -240,6 +240,25 @@ def apply_corrections(
         corrected = next_corrected
         variance = next_variance
 
+    coherent_length = getattr(args, "sample_coherent_scatter_length", None)
+    total_length_squared = getattr(args, "sample_total_scatter_length_squared", None)
+    if coherent_length is not None or total_length_squared is not None:
+        if coherent_length is None or total_length_squared is None:
+            raise ValueError(
+                "--sample-coherent-scatter-length and --sample-total-scatter-length-squared must be provided together"
+            )
+        coherent_length_squared = (float(coherent_length) ** 2) / 100.0
+        total_scatter_length_squared = float(total_length_squared) / 100.0
+        if coherent_length_squared <= 0.0:
+            raise ValueError("--sample-coherent-scatter-length must be > 0")
+
+        laue_monotonic_diffuse_scat = total_scatter_length_squared / coherent_length_squared
+        corrected = [
+            (value / coherent_length_squared) + (1.0 - laue_monotonic_diffuse_scat)
+            for value in corrected
+        ]
+        variance = [value / (coherent_length_squared**2) for value in variance]
+
     error = [math.sqrt(max(value, 0.0)) for value in variance]
     return corrected, error
 

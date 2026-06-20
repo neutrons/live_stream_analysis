@@ -84,8 +84,8 @@ class _NexusRunner:
         run_complete_callback=None,
         histogram_state_callback=None,
     ):
-        _ = (run_complete_callback, histogram_state_callback)
-        return accumulate_nexus_histogram(
+        _ = histogram_state_callback
+        packet_count, total_events, histogram_events, hist, adara_stats = accumulate_nexus_histogram(
             nexus_files=reader,
             q_conversion=q_conversion,
             histogram_bins=histogram_bins,
@@ -99,6 +99,9 @@ class _NexusRunner:
             q_conversion_provider=q_conversion_provider,
             histogram_callback=histogram_callback,
         )
+        if run_complete_callback is not None:
+            run_complete_callback(None)
+        return packet_count, total_events, histogram_events, hist, adara_stats
 
     def run_basic_mode(self, reader, *, chunk_size: int) -> int:
         return run_nexus_basic_mode(reader, chunk_size=chunk_size)

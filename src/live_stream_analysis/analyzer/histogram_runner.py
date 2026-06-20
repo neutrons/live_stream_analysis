@@ -43,6 +43,8 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
     corrected_hist: list[float] = []
     corrected_error: list[float] = []
     active_hist: list[int] | None = None
+    next_snapshot_event_count = max(1, args.histogram_snapshot_every) if args.histogram_snapshot_every > 0 else None
+    adara_stats = None
     try:
         LOGGER.info("Starting histogram analysis")
         histogram_bins = validate_histogram_args(args)
@@ -57,6 +59,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
         LOGGER.info("Loading pixel geometry CSV from %s", Path(args.histogram_pixel_geometry_csv).resolve())
         q_conversion = load_pixel_q_conversion(args.histogram_pixel_geometry_csv)
         runtime_state = HistogramRuntimeState(pixel_q_conversion=q_conversion)
+        runtime_state.correction_bins = histogram_bins
         if args.adara_file_delay_intersect:
             runtime_state.configure_adara_file_read_gate(False)
         LOGGER.info("Loaded pixel geometry for %s detector ids", len(q_conversion.q_matrix_constants))
@@ -91,20 +94,40 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             LOGGER.info("Received INTERSECT start_adara_file_read signal")
         LOGGER.info("Beginning event accumulation")
 
-        def _publish_histogram_snapshot(step_count: int, hist: list[int]) -> None:
-            nonlocal last_intersect_publish_at
+        def _publish_histogram_snapshot(histogram_event_count: int, hist: list[int]) -> None:
+            nonlocal last_intersect_publish_at, next_snapshot_event_count
             if publisher is None or intersect_config is None:
-                return
-            _ = step_count
-            now = time.monotonic()
-            interval = max(1, intersect_config.publish_interval_seconds)
-            if last_intersect_publish_at is not None and (now - last_intersect_publish_at) < interval:
-                return
-            last_intersect_publish_at = now
-            q_values = [args.histogram_q_min + (index * args.histogram_q_bin_size) for index in range(len(hist))]
-            errors = [math.sqrt(float(value)) for value in hist]
-            payload = build_histogram_payload(q_values, [float(value) for value in hist], errors)
-            publisher.publish_event(intersect_config.histogram_event_name, payload)
+                pass
+            else:
+                _ = histogram_event_count
+                now = time.monotonic()
+                interval = max(1, intersect_config.publish_interval_seconds)
+                if last_intersect_publish_at is None or (now - last_intersect_publish_at) >= interval:
+                    last_intersect_publish_at = now
+                    q_values = [args.histogram_q_min + (index * args.histogram_q_bin_size) for index in range(len(hist))]
+                    errors = [math.sqrt(float(value)) for value in hist]
+                    payload = build_histogram_payload(q_values, [float(value) for value in hist], errors)
+                    publisher.publish_event(intersect_config.histogram_event_name, payload)
+
+            if (
+                next_snapshot_event_count is not None
+                and args.histogram_output_csv is not None
+                and histogram_event_count >= next_snapshot_event_count
+            ):
+                snapshot_hist, snapshot_error = apply_corrections(hist, args, histogram_bins, runtime_state=runtime_state)
+                write_histogram_csv(
+                    snapshot_hist,
+                    snapshot_error,
+                    args.histogram_output_csv,
+                    args.histogram_q_bin_size,
+                    args.histogram_q_min,
+                )
+                LOGGER.info(
+                    "Wrote histogram snapshot CSV after %s histogrammed events to %s",
+                    histogram_event_count,
+                    Path(args.histogram_output_csv).resolve(),
+                )
+                next_snapshot_event_count += args.histogram_snapshot_every
 
         def _finalize_run(hist: list[int]) -> tuple[list[float], list[float]]:
             final_hist, final_error = apply_corrections(hist, args, histogram_bins, runtime_state=runtime_state)
@@ -121,6 +144,10 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 publisher.publish_event(
                     intersect_config.histogram_event_name,
                     build_histogram_payload(q_values, final_hist, final_error),
+                )
+                LOGGER.info(
+                    "Publishing INTERSECT run-complete event '%s'",
+                    intersect_config.run_complete_event_name,
                 )
                 publisher.publish_event(
                     intersect_config.run_complete_event_name,
@@ -139,7 +166,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             nonlocal active_hist
             active_hist = hist
 
-        packet_count, total_events, histogram_events, hist = runner.accumulate_histogram(
+        accumulation_result = runner.accumulate_histogram(
             reader,
             args,
             q_conversion,
@@ -151,6 +178,16 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             run_complete_callback=_handle_run_complete,
             histogram_state_callback=_set_active_hist,
         )
+        if len(accumulation_result) == 5:
+            packet_count, total_events, histogram_events, hist, adara_stats = accumulation_result
+        elif len(accumulation_result) == 4:
+            packet_count, total_events, histogram_events, hist = accumulation_result
+            adara_stats = None
+        else:
+            raise ValueError(
+                "accumulate_histogram() must return 4 or 5 values "
+                f"(got {len(accumulation_result)})"
+            )
         active_hist = hist
         LOGGER.info(
             "Finished event accumulation: packets_or_groups=%s total_events=%s histogrammed_events=%s",
@@ -197,6 +234,13 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
     print(f"Packets read         : {packet_count}")
     print(f"Total events         : {total_events}")
     print(f"Histogrammed events  : {histogram_events}")
+    if adara_stats is not None:
+        print(f"Skipped non-banked   : {adara_stats.skipped_non_banked_packets}")
+        print(f"Skipped bad pixel    : {adara_stats.skipped_invalid_pixel_ids}")
+        print(f"Skipped bad tof      : {adara_stats.skipped_zero_or_negative_tof}")
+        print(f"Skipped masked pixel : {adara_stats.skipped_masked_pixels}")
+        print(f"Skipped no Q         : {adara_stats.skipped_unconvertible_events}")
+        print(f"Skipped out-of-range : {adara_stats.skipped_out_of_range_bins}")
     if args.background_subtraction is not None:
         print(f"Background CSV       : {Path(args.background_subtraction).resolve()}")
     if args.normalization is not None:
