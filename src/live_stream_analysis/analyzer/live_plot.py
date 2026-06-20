@@ -116,8 +116,16 @@ class _BrowserPlotServer(ThreadingHTTPServer):
 
 
 class BrowserHistogramPlotter:
-    def __init__(self, q_bin_size: float, histogram_bins: int, host: str, port: int, open_browser: bool):
-        q_values = [(index + 0.5) * q_bin_size for index in range(histogram_bins)]
+    def __init__(
+        self,
+        q_min: float,
+        q_bin_size: float,
+        histogram_bins: int,
+        host: str,
+        port: int,
+        open_browser: bool,
+    ):
+        q_values = [q_min + (index * q_bin_size) for index in range(histogram_bins)]
         self._state = _BrowserPlotState(q_values)
         self._server = _BrowserPlotServer((host, port), self._state, _browser_plot_html())
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
@@ -141,10 +149,10 @@ class BrowserHistogramPlotter:
 
 
 class LiveHistogramPlotter:
-    def __init__(self, q_bin_size: float, histogram_bins: int):
+    def __init__(self, q_min: float, q_bin_size: float, histogram_bins: int):
         plt.ion()
         self._figure, (self._axis, self._relative_axis) = plt.subplots(2, 1, figsize=(12, 9), sharex=True)
-        self._q_values = [(index + 0.5) * q_bin_size for index in range(histogram_bins)]
+        self._q_values = [q_min + (index * q_bin_size) for index in range(histogram_bins)]
         zeros = [0.0] * histogram_bins
         (self._line,) = self._axis.plot(self._q_values, zeros, color="tab:blue", linewidth=1.5, label="I(Q)")
         self._band = self._axis.fill_between(self._q_values, zeros, zeros, color="tab:blue", alpha=0.2)
@@ -210,6 +218,7 @@ def create_live_histogram_plotter(args: argparse.Namespace, histogram_bins: int)
 
     if mode == "browser":
         return BrowserHistogramPlotter(
+            args.histogram_q_min,
             args.histogram_q_bin_size,
             histogram_bins,
             args.live_plot_host,
@@ -222,7 +231,7 @@ def create_live_histogram_plotter(args: argparse.Namespace, histogram_bins: int)
         print("Matplotlib is using a non-interactive backend; disabling live plot.", file=sys.stderr)
         return NullHistogramPlotter()
 
-    return LiveHistogramPlotter(args.histogram_q_bin_size, histogram_bins)
+    return LiveHistogramPlotter(args.histogram_q_min, args.histogram_q_bin_size, histogram_bins)
 
 
 def compute_relative_uncertainty(intensity: list[float], error: list[float]) -> list[float]:

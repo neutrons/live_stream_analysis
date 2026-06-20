@@ -8,7 +8,8 @@ keywords = ["neutrons", "python"]
 readme = "README.md"
 dependencies = [
   "h5py>=3.16.0",
-  "intersect-sdk",
+  "intersect-sdk==0.9.0",
+  "intersect-sdk-common==0.9.5",
   # Dependencies available from both PyPI and conda should be listed here
   "matplotlib>=3.10.9",
   "numpy>=2.2.6,<3",

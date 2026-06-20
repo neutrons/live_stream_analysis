@@ -107,6 +107,13 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                     q_values = [args.histogram_q_min + (index * args.histogram_q_bin_size) for index in range(len(hist))]
                     errors = [math.sqrt(float(value)) for value in hist]
                     payload = build_histogram_payload(q_values, [float(value) for value in hist], errors)
+                    LOGGER.info(
+                        "Publishing histogram_updated event: bins=%d first_q=%.3f last_q=%.3f total_counts=%.0f",
+                        len(hist),
+                        q_values[0] if q_values else float("nan"),
+                        q_values[-1] if q_values else float("nan"),
+                        float(sum(hist)),
+                    )
                     publisher.publish_event(intersect_config.histogram_event_name, payload)
 
             if (
@@ -155,11 +162,16 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 )
             return final_hist, final_error
 
+        run_completion_handled = False
+
         def _handle_run_complete(_packet) -> None:
-            nonlocal corrected_hist, corrected_error
+            nonlocal corrected_hist, corrected_error, run_completion_handled
+            if run_completion_handled:
+                return
             if active_hist is None:
                 return
             corrected_hist, corrected_error = _finalize_run(active_hist)
+            run_completion_handled = True
             active_hist[:] = [0] * len(active_hist)
 
         def _set_active_hist(hist: list[int]) -> None:
@@ -196,7 +208,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             histogram_events,
         )
         LOGGER.info("Applying background subtraction and normalization corrections")
-        if any(hist):
+        if any(hist) and not run_completion_handled:
             corrected_hist, corrected_error = _finalize_run(hist)
         else:
             corrected_hist = [0.0] * histogram_bins
