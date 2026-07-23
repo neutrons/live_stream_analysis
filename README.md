@@ -485,3 +485,10 @@ This project uses uv for lockfile management and development environments, with 
     uv run pytest
     uv run live_stream_analysis --help
     ```
+# NFS shares
+
+| Experiment         | stream size | remote                                                    | local directory          | command     |
+|--------------------|-------------|-----------------------------------------------------------|--------------------------|-------------|
+| Fe2O3 - May 2025   | 300 GiB     | 10.64.135.253:/share_66aaa9bb_61c7_4f12_964e_7c14f30e2ad3 | nomad-adara-fe2o3-share  | sudo mount -t nfs 10.64.135.253:/share_66aaa9bb_61c7_4f12_964e_7c14f30e2ad3 ./nomad-adara-fe2o3-share |  
+| Carbon - June 2026 | 1,100 GiB   | 10.64.135.253:/share_8b4e51ef_ab6f_4c13_a35e_d9bbeb751e39 | nomad-adara-carbon-share | sudo mount -t nfs 10.64.135.253:/share_8b4e51ef_ab6f_4c13_a35e_d9bbeb751e39 ./nomad-adara-carbon-share |
+ 
