@@ -45,6 +45,7 @@ class _AdaraRunner:
         histogram_callback=None,
         run_complete_callback=None,
         histogram_state_callback=None,
+        hist=None,
     ):
         _ = chunk_size
         return accumulate_adara_histogram(
@@ -61,6 +62,7 @@ class _AdaraRunner:
             histogram_callback=histogram_callback,
             run_complete_callback=run_complete_callback,
             histogram_state_callback=histogram_state_callback,
+            hist=hist,
         )
 
     def run_basic_mode(self, reader, *, chunk_size: int) -> int:
