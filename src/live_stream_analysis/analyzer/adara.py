@@ -20,6 +20,7 @@ from .live_plot import HistogramPlotter, maybe_update_live_plot
 
 LOGGER = logging.getLogger(__name__)
 
+ADARA_RUN_STATUS_NEW_RUN = 1
 ADARA_RUN_STATUS_END_RUN = 4
 ADARA_BANKED_EVENT_FORMAT = 0x400001
 
@@ -34,7 +35,7 @@ def _safe_packet_attr(packet, attr: str):
     return value if value is not None else '<missing>'
 
 
-def _is_end_run_status_packet(packet) -> bool:
+def _is_run_boundary_status_packet(packet) -> bool:
     status_getter = getattr(packet, "get_status", None)
     if status_getter is None:
         return False
@@ -42,9 +43,7 @@ def _is_end_run_status_packet(packet) -> bool:
         status = status_getter()
     except Exception:
         return False
-    if status != ADARA_RUN_STATUS_END_RUN:
-        return False
-    return AdaraRunStatusPacket is None or isinstance(packet, AdaraRunStatusPacket)
+    return status in {ADARA_RUN_STATUS_NEW_RUN, ADARA_RUN_STATUS_END_RUN}
 
 
 @dataclass
@@ -106,9 +105,13 @@ def accumulate_adara_histogram(
     histogram_callback=None,
     run_complete_callback=None,
     histogram_state_callback=None,
+    hist: list[int] | None = None,
 ) -> tuple[int, int, int, list[int], AdaraHistogramStats]:
     stats = AdaraHistogramStats()
-    hist = [0] * histogram_bins
+    if hist is None:
+        hist = [0] * histogram_bins
+    elif len(hist) != histogram_bins:
+        raise ValueError("existing histogram length does not match histogram_bins")
     if histogram_q_bin_size <= 0.0:
         raise ValueError("histogram_q_bin_size must be > 0")
     q_index_scale = 1.0 / histogram_q_bin_size
@@ -119,7 +122,7 @@ def accumulate_adara_histogram(
 
     for packet in reader.read_generator():
         stats.packet_count += 1
-        if run_complete_callback is not None and _is_end_run_status_packet(packet):
+        if run_complete_callback is not None and _is_run_boundary_status_packet(packet):
             maybe_update_live_plot(
                 plotter,
                 hist,
@@ -131,7 +134,7 @@ def accumulate_adara_histogram(
             if histogram_callback is not None:
                 histogram_callback(stats.histogram_events, hist)
             LOGGER.info(
-                "Received ADARA end-run status packet after %s packets (%s total source events): packet_type=%s status=%s run_number=%s run_start=%s file_number=%s",
+                "Received ADARA run-boundary status packet after %s packets (%s total source events): packet_type=%s status=%s run_number=%s run_start=%s file_number=%s",
                 stats.packet_count,
                 stats.total_events,
                 type(packet).__name__,
@@ -141,7 +144,7 @@ def accumulate_adara_histogram(
                 _safe_packet_attr(packet, 'get_file_number'),
             )
             run_complete_callback(packet)
-            break
+            return stats.packet_count, stats.total_events, stats.histogram_events, hist, stats
 
         if getattr(packet, "get_format_int", None) is not None:
             if packet.get_format_int() != ADARA_BANKED_EVENT_FORMAT:
