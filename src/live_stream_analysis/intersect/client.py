@@ -23,6 +23,8 @@ def run_event_listener(config_path: str | Path) -> int:
     return 0
 
 
-def _print_event_callback(source: str, capability: str, event_name: str, payload: Any) -> IntersectClientCallback | None:
+def _print_event_callback(
+    source: str, capability: str, event_name: str, payload: Any
+) -> IntersectClientCallback | None:
     print(json.dumps({"source": source, "capability": capability, "event": event_name, "payload": payload}))
     return None

@@ -92,7 +92,9 @@ def test_accumulate_adara_histogram_uses_ehsan_default_tof_then_pixel_tuple_orde
     assert stats.skipped_invalid_pixel_ids == 1
 
 
-def test_accumulate_adara_histogram_calls_run_complete_callback_only_for_run_boundaries(monkeypatch: pytest.MonkeyPatch):
+def test_accumulate_adara_histogram_calls_run_complete_callback_only_for_run_boundaries(
+    monkeypatch: pytest.MonkeyPatch,
+):
     monkeypatch.setattr("live_stream_analysis.analyzer.adara.AdaraRunStatusPacket", _RunStatusPacket)
     reader = _Reader([_RunStatusPacket(5), _Packet([(1, 100)]), _RunStatusPacket(1), _Packet([(100, 1)])])
     q_conversion = PixelQConversion(
@@ -182,11 +184,13 @@ def test_accumulate_adara_histogram_detects_end_run_from_status_accessor_without
 
 def test_accumulate_adara_histogram_resets_and_continues_after_end_run(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr("live_stream_analysis.analyzer.adara.AdaraRunStatusPacket", _RunStatusPacket)
-    reader = _Reader([
-        _Packet([(100, 1)]),
-        _RunStatusPacket(4),
-        _Packet([(100, 1)]),
-    ])
+    reader = _Reader(
+        [
+            _Packet([(100, 1)]),
+            _RunStatusPacket(4),
+            _Packet([(100, 1)]),
+        ]
+    )
     q_conversion = PixelQConversion(
         q_matrix_constants=[0.0, 1000.0],
         difc=[0.0, 0.0],
@@ -225,11 +229,13 @@ def test_accumulate_adara_histogram_resets_and_continues_after_end_run(monkeypat
 
 def test_accumulate_adara_histogram_resets_and_continues_after_new_run(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr("live_stream_analysis.analyzer.adara.AdaraRunStatusPacket", _RunStatusPacket)
-    reader = _Reader([
-        _Packet([(100, 1)]),
-        _RunStatusPacket(1),
-        _Packet([(100, 1)]),
-    ])
+    reader = _Reader(
+        [
+            _Packet([(100, 1)]),
+            _RunStatusPacket(1),
+            _Packet([(100, 1)]),
+        ]
+    )
     q_conversion = PixelQConversion(
         q_matrix_constants=[0.0, 1000.0],
         difc=[0.0, 0.0],

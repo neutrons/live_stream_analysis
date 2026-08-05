@@ -149,7 +149,8 @@ def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         type=float,
         help=(
             "Optional average coherent scattering length for the sample in fm. "
-            "When provided with --sample-total-scatter-length-squared, convert corrected intensity to Mantid-style S(Q)."
+            "When provided with --sample-total-scatter-length-squared, "
+            "convert corrected intensity to Mantid-style S(Q)."
         ),
     )
     parser.add_argument(

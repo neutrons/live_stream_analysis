@@ -78,9 +78,7 @@ class HistogramRuntimeState:
             self.correction_bins = len(values)
             return
         if len(values) != self.correction_bins:
-            raise ValueError(
-                f"{kind} correction CSV has {len(values)} bins but expected {self.correction_bins}"
-            )
+            raise ValueError(f"{kind} correction CSV has {len(values)} bins but expected {self.correction_bins}")
 
 
 def _load_correction_from_csv_text(csv_text: str) -> tuple[list[float], list[float]]:

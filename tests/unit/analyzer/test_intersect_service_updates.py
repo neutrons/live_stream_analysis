@@ -74,7 +74,11 @@ def test_set_background_rejects_mismatched_runtime_bins():
     capability = LiveStreamAnalysisCapability(runtime_state=runtime_state)
 
     with pytest.raises(ValueError, match="Background correction CSV has 1 bins but expected 1475"):
-        capability.set_background(CsvTextRequest(csv_text="Q value,I\\(Q\\),Error I\\(Q\\)\n0.0,0.0,0.0\n".replace("\\(", "(").replace("\\)", ")")))
+        capability.set_background(
+            CsvTextRequest(
+                csv_text="Q value,I\\(Q\\),Error I\\(Q\\)\n0.0,0.0,0.0\n".replace("\\(", "(").replace("\\)", ")")
+            )
+        )
 
 
 def test_start_adara_file_read_releases_runtime_gate():

@@ -177,7 +177,9 @@ def test_preparer_calibration_file_adds_diffcal_and_use_columns(tmp_path: Path) 
     assert int(detector_data[7]) == detector_calibration.use
 
     masked_detector = next(
-        detector for detector, calibration in calibration_by_detector.items() if calibration.use == 0 and detector in data_by_detector
+        detector
+        for detector, calibration in calibration_by_detector.items()
+        if calibration.use == 0 and detector in data_by_detector
     )
     assert int(data_by_detector[masked_detector][7]) == 0
 

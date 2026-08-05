@@ -253,10 +253,7 @@ def apply_corrections(
             raise ValueError("--sample-coherent-scatter-length must be > 0")
 
         laue_monotonic_diffuse_scat = total_scatter_length_squared / coherent_length_squared
-        corrected = [
-            (value / coherent_length_squared) + (1.0 - laue_monotonic_diffuse_scat)
-            for value in corrected
-        ]
+        corrected = [(value / coherent_length_squared) + (1.0 - laue_monotonic_diffuse_scat) for value in corrected]
         variance = [value / (coherent_length_squared**2) for value in variance]
 
     error = [math.sqrt(max(value, 0.0)) for value in variance]

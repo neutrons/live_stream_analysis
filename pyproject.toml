@@ -92,6 +92,14 @@ exclude = [
 select = ["A", "ARG", "ASYNC", "BLE", "C90", "E", "F", "I", "N", "UP032", "W"]
 ignore = []
 
+[tool.ruff.lint.per-file-ignores]
+"src/live_stream_analysis/analyzer/adara.py" = ["BLE001", "C901", "E501"]
+"src/live_stream_analysis/analyzer/histogram.py" = ["C901"]
+"src/live_stream_analysis/analyzer/histogram_runner.py" = ["C901", "E501"]
+"src/live_stream_analysis/analyzer/live_plot.py" = ["E501"]
+"src/live_stream_analysis/analyzer/nexus.py" = ["C901"]
+"test-read-adara.py" = ["E501"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["live_stream_analysis"]
 

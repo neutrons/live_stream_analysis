@@ -31,8 +31,8 @@ def _safe_packet_attr(packet, attr: str):
         try:
             return value()
         except Exception:
-            return '<error>'
-    return value if value is not None else '<missing>'
+            return "<error>"
+    return value if value is not None else "<missing>"
 
 
 def _is_run_boundary_status_packet(packet) -> bool:
@@ -138,10 +138,10 @@ def accumulate_adara_histogram(
                 stats.packet_count,
                 stats.total_events,
                 type(packet).__name__,
-                _safe_packet_attr(packet, 'get_status'),
-                _safe_packet_attr(packet, 'get_run_number'),
-                _safe_packet_attr(packet, 'get_run_start'),
-                _safe_packet_attr(packet, 'get_file_number'),
+                _safe_packet_attr(packet, "get_status"),
+                _safe_packet_attr(packet, "get_run_number"),
+                _safe_packet_attr(packet, "get_run_start"),
+                _safe_packet_attr(packet, "get_file_number"),
             )
             run_complete_callback(packet)
             # Reset histogram for next run
@@ -159,7 +159,6 @@ def accumulate_adara_histogram(
         stats.total_events += len(events)
 
         for tof, pixel_id in events:
-
             active_q_conversion = q_conversion_provider() if q_conversion_provider is not None else q_conversion
             if active_q_conversion is None:
                 continue

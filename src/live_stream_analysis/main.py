@@ -26,8 +26,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if getattr(args, "_cmd", None) == "analyze" and getattr(args, "enable_intersect", False) and not getattr(
-        args, "intersect_config", None
+    if (
+        getattr(args, "_cmd", None) == "analyze"
+        and getattr(args, "enable_intersect", False)
+        and not getattr(args, "intersect_config", None)
     ):
         parser.error("--enable-intersect requires --intersect-config")
 

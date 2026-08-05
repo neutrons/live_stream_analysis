@@ -110,7 +110,9 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 interval = max(1, intersect_config.publish_interval_seconds)
                 if last_intersect_publish_at is None or (now - last_intersect_publish_at) >= interval:
                     last_intersect_publish_at = now
-                    q_values = [args.histogram_q_min + (index * args.histogram_q_bin_size) for index in range(len(hist))]
+                    q_values = [
+                        args.histogram_q_min + (index * args.histogram_q_bin_size) for index in range(len(hist))
+                    ]
                     errors = [math.sqrt(float(value)) for value in hist]
                     payload = build_histogram_payload(q_values, [float(value) for value in hist], errors)
                     LOGGER.info(
@@ -127,7 +129,9 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 and args.histogram_output_csv is not None
                 and histogram_event_count >= next_snapshot_event_count
             ):
-                snapshot_hist, snapshot_error = apply_corrections(hist, args, histogram_bins, runtime_state=runtime_state)
+                snapshot_hist, snapshot_error = apply_corrections(
+                    hist, args, histogram_bins, runtime_state=runtime_state
+                )
                 write_histogram_csv(
                     snapshot_hist,
                     snapshot_error,
@@ -164,7 +168,9 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 float(sum(final_hist)),
             )
             if publisher is not None and intersect_config is not None:
-                q_values = [args.histogram_q_min + (index * args.histogram_q_bin_size) for index in range(len(final_hist))]
+                q_values = [
+                    args.histogram_q_min + (index * args.histogram_q_bin_size) for index in range(len(final_hist))
+                ]
                 publisher.publish_event(
                     intersect_config.histogram_event_name,
                     build_histogram_payload(q_values, final_hist, final_error),
@@ -224,10 +230,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 packet_count, total_events, histogram_events, hist = accumulation_result
                 adara_stats = None
             else:
-                raise ValueError(
-                    "accumulate_histogram() must return 4 or 5 values "
-                    f"(got {len(accumulation_result)})"
-                )
+                raise ValueError(f"accumulate_histogram() must return 4 or 5 values (got {len(accumulation_result)})")
 
             cumulative_packet_count += packet_count
             cumulative_total_events += total_events
@@ -254,9 +257,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             reconnect_attempts += 1
             max_reconnects = args.adara_stream_max_reconnects
             if max_reconnects >= 0 and reconnect_attempts > max_reconnects:
-                raise OSError(
-                    "ADARA live stream ended before END_RUN and reconnect limit was reached"
-                )
+                raise OSError("ADARA live stream ended before END_RUN and reconnect limit was reached")
 
             LOGGER.warning(
                 "ADARA live stream disconnected before END_RUN after %s packets (%s total source events); reconnect attempt %s; cumulative packets=%s cumulative source events=%s cumulative histogrammed events=%s",
@@ -298,7 +299,10 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             corrected_error = [0.0] * histogram_bins
         LOGGER.info("Final histogram update complete")
         if plotter is not None and _should_keep_live_plot_open(args):
-            LOGGER.info("Keeping browser live plot available at %s until interrupted", getattr(plotter, "url", "configured host/port"))
+            LOGGER.info(
+                "Keeping browser live plot available at %s until interrupted",
+                getattr(plotter, "url", "configured host/port"),
+            )
             plotter.wait_until_closed()
     except KeyboardInterrupt:
         print("Interrupted by user", file=sys.stderr)
