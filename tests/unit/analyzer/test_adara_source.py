@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 from readadara import AdaraFileReader
@@ -10,6 +11,11 @@ from live_stream_analysis.analyzer.adara import accumulate_adara_histogram, buil
 from live_stream_analysis.analyzer.histogram import PixelQConversion
 from live_stream_analysis.analyzer.live_plot import NullHistogramPlotter
 from tests.unit.analyzer.adara_fixtures import event_packet
+
+
+class HistogramSnapshot(NamedTuple):
+    event_count: int
+    bins: list[int]
 
 
 def _write_adara(tmp_path: Path, *packets: bytes) -> Path:
@@ -103,6 +109,7 @@ def test_accumulate_adara_histogram_calls_run_complete_callback_only_for_run_bou
         use=[1, 1],
     )
     completed_packets: list[_RunStatusPacket] = []
+    histogram_snapshots: list[HistogramSnapshot] = []
 
     packet_count, total_events, histogram_events, hist, stats = accumulate_adara_histogram(
         reader=reader,
@@ -114,16 +121,21 @@ def test_accumulate_adara_histogram_calls_run_complete_callback_only_for_run_bou
         plotter=NullHistogramPlotter(),
         live_plot_refresh_every=1,
         event_log_interval=100_000,
+        histogram_callback=lambda count, current_hist: histogram_snapshots.append(HistogramSnapshot(count, list(current_hist))),
         run_complete_callback=completed_packets.append,
     )
 
-    assert packet_count == 3
-    assert total_events == 1
-    assert histogram_events == 0
-    assert sum(hist) == 0
+    assert packet_count == 4
+    assert total_events == 2
+    assert histogram_events == 1
+    assert sum(hist) == 1
+    assert hist[500] == 1
     assert len(completed_packets) == 1
     assert completed_packets[0].get_status() == 1
-    assert stats.packet_count == 3
+    assert histogram_snapshots[-1].event_count == 1
+    assert sum(histogram_snapshots[-1].bins) == 1
+    assert histogram_snapshots[-1].bins[500] == 1
+    assert stats.packet_count == 4
 
 
 def test_accumulate_adara_histogram_detects_end_run_from_status_accessor_without_exact_packet_type(
@@ -147,7 +159,7 @@ def test_accumulate_adara_histogram_detects_end_run_from_status_accessor_without
         use=[1, 1],
     )
     completed_packets: list[_ForeignRunStatusPacket] = []
-    histogram_snapshots: list[tuple[int, list[int]]] = []
+    histogram_snapshots: list[HistogramSnapshot] = []
 
     packet_count, total_events, histogram_events, hist, stats = accumulate_adara_histogram(
         reader=reader,
@@ -159,7 +171,7 @@ def test_accumulate_adara_histogram_detects_end_run_from_status_accessor_without
         plotter=NullHistogramPlotter(),
         live_plot_refresh_every=1000,
         event_log_interval=100_000,
-        histogram_callback=lambda count, current_hist: histogram_snapshots.append((count, list(current_hist))),
+        histogram_callback=lambda count, current_hist: histogram_snapshots.append(HistogramSnapshot(count, list(current_hist))),
         run_complete_callback=completed_packets.append,
     )
 
@@ -169,8 +181,8 @@ def test_accumulate_adara_histogram_detects_end_run_from_status_accessor_without
     assert sum(hist) == 0
     assert len(completed_packets) == 1
     assert completed_packets[0].get_status() == 4
-    assert histogram_snapshots[-1][0] == 0
-    assert sum(histogram_snapshots[-1][1]) == 0
+    assert histogram_snapshots[-1].event_count == 0
+    assert sum(histogram_snapshots[-1].bins) == 0
     assert stats.packet_count == 2
 
 
@@ -189,7 +201,7 @@ def test_accumulate_adara_histogram_resets_and_continues_after_end_run(monkeypat
         use=[1, 1],
     )
     completed_packets: list[_RunStatusPacket] = []
-    histogram_snapshots: list[tuple[int, list[int]]] = []
+    histogram_snapshots: list[HistogramSnapshot] = []
 
     packet_count, total_events, histogram_events, hist, stats = accumulate_adara_histogram(
         reader=reader,
@@ -201,7 +213,7 @@ def test_accumulate_adara_histogram_resets_and_continues_after_end_run(monkeypat
         plotter=NullHistogramPlotter(),
         live_plot_refresh_every=1000,
         event_log_interval=100_000,
-        histogram_callback=lambda count, current_hist: histogram_snapshots.append((count, list(current_hist))),
+        histogram_callback=lambda count, current_hist: histogram_snapshots.append(HistogramSnapshot(count, list(current_hist))),
         run_complete_callback=completed_packets.append,
     )
 
@@ -212,8 +224,8 @@ def test_accumulate_adara_histogram_resets_and_continues_after_end_run(monkeypat
     assert hist[500] == 1
     assert len(completed_packets) == 1
     assert completed_packets[0].get_status() == 4
-    assert histogram_snapshots[-1][0] == 0
-    assert sum(histogram_snapshots[-1][1]) == 0
+    assert histogram_snapshots[-1].event_count == 0
+    assert sum(histogram_snapshots[-1].bins) == 0
     assert stats.packet_count == 3
 
 
@@ -232,7 +244,7 @@ def test_accumulate_adara_histogram_resets_and_continues_after_new_run(monkeypat
         use=[1, 1],
     )
     completed_packets: list[_RunStatusPacket] = []
-    histogram_snapshots: list[tuple[int, list[int]]] = []
+    histogram_snapshots: list[HistogramSnapshot] = []
 
     packet_count, total_events, histogram_events, hist, stats = accumulate_adara_histogram(
         reader=reader,
@@ -244,7 +256,7 @@ def test_accumulate_adara_histogram_resets_and_continues_after_new_run(monkeypat
         plotter=NullHistogramPlotter(),
         live_plot_refresh_every=1000,
         event_log_interval=100_000,
-        histogram_callback=lambda count, current_hist: histogram_snapshots.append((count, list(current_hist))),
+        histogram_callback=lambda count, current_hist: histogram_snapshots.append(HistogramSnapshot(count, list(current_hist))),
         run_complete_callback=completed_packets.append,
     )
 
@@ -255,8 +267,8 @@ def test_accumulate_adara_histogram_resets_and_continues_after_new_run(monkeypat
     assert hist[500] == 1
     assert len(completed_packets) == 1
     assert completed_packets[0].get_status() == 1
-    assert histogram_snapshots[-1][0] == 0
-    assert sum(histogram_snapshots[-1][1]) == 0
+    assert histogram_snapshots[-1].event_count == 0
+    assert sum(histogram_snapshots[-1].bins) == 0
     assert stats.packet_count == 3
 
 

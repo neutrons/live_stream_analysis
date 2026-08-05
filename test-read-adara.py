@@ -1,5 +1,4 @@
-from readadara import AdaraFileReader, AdaraLiveStreamReader
-import time
+from readadara import AdaraFileReader
 
 #reader = AdaraLiveStreamReader('bl1b-daq1', 31415)
 #g = reader.read_generator()

@@ -11,7 +11,7 @@ from readadara import AdaraFileReader
 
 from live_stream_analysis.analyzer.factory import build_reader as _build_reader
 from live_stream_analysis.analyzer.histogram import load_correction_csv
-from live_stream_analysis.analyzer.live_plot import BrowserHistogramPlotter, compute_relative_uncertainty
+from live_stream_analysis.analyzer.live_plot import compute_relative_uncertainty
 from live_stream_analysis.main import build_parser, main
 from tests.unit.analyzer.adara_fixtures import event_packet, null_packet, rtdl_packet
 
@@ -641,9 +641,11 @@ class TestAdaraFileCLI:
                 histogram_callback=None,
                 run_complete_callback=None,
                 histogram_state_callback=None,
+                hist=None,
             ):
-                _ = (reader, args, q_conversion, histogram_bins, plotter, chunk_size, q_conversion_provider, histogram_callback)
-                hist = [0] * 5000
+                _ = (reader, args, q_conversion, histogram_bins, plotter, chunk_size, q_conversion_provider, histogram_callback, hist)
+                if hist is None:
+                    hist = [0] * 5000
                 histogram_state_callback(hist)
                 hist[4950] = 2
                 run_complete_callback(object())
@@ -656,7 +658,7 @@ class TestAdaraFileCLI:
 
         monkeypatch.setattr(
             "live_stream_analysis.analyzer.histogram_runner.create_event_publisher",
-            lambda _config, runtime_state=None: _StubPublisher(),
+            lambda _config, **_kwargs: _StubPublisher(),
         )
         monkeypatch.setattr(
             "live_stream_analysis.analyzer.histogram_runner.create_source_runner",
@@ -828,8 +830,8 @@ class TestAdaraFileCLI:
         created: list[tuple[str, int, bool]] = []
 
         class _StubBrowserPlotter:
-            def __init__(self, q_bin_size: float, histogram_bins: int, host: str, port: int, open_browser: bool):
-                _ = (q_bin_size, histogram_bins)
+            def __init__(self, q_min: float, q_bin_size: float, histogram_bins: int, host: str, port: int, open_browser: bool):
+                _ = (q_min, q_bin_size, histogram_bins)
                 created.append((host, port, open_browser))
 
             def update(self, _intensity, _error, _relative_uncertainty):

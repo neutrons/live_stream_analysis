@@ -9,7 +9,6 @@ from live_stream_analysis.preparer.calibration import load_diffraction_calibrati
 from live_stream_analysis.preparer.converter import write_pixel_geometry_csv
 from live_stream_analysis.preparer.instrument import build_detector_geometry
 
-
 TESTS_ROOT = Path(__file__).parents[2]
 
 

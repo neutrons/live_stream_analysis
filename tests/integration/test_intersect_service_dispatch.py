@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 
+from intersect_sdk import IntersectService
+
 from live_stream_analysis.intersect.config import build_service_config
 from live_stream_analysis.intersect.data_models import IntersectConfig, UpdateResponse
 from live_stream_analysis.intersect.service import HistogramRuntimeState, LiveStreamAnalysisCapability
-from intersect_sdk import IntersectService
 
 
 def _config() -> IntersectConfig:

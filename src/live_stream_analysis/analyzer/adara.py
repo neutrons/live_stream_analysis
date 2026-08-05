@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import logging
 import math
+from dataclasses import dataclass
 
 try:
     from readadara import AdaraFileReader, AdaraLiveStreamReader
@@ -144,7 +144,11 @@ def accumulate_adara_histogram(
                 _safe_packet_attr(packet, 'get_file_number'),
             )
             run_complete_callback(packet)
-            return stats.packet_count, stats.total_events, stats.histogram_events, hist, stats
+            # Reset histogram for next run
+            hist[:] = [0] * len(hist)
+            if histogram_callback is not None:
+                histogram_callback(0, hist)
+            continue
 
         if getattr(packet, "get_format_int", None) is not None:
             if packet.get_format_int() != ADARA_BANKED_EVENT_FORMAT:
@@ -172,7 +176,7 @@ def accumulate_adara_histogram(
                 stats.skipped_masked_pixels += 1
                 continue
 
-            q = (active_q_conversion.q_matrix_constants[pixel_id] * tof_tick_us) / float(tof)
+            q = active_q_conversion.q_matrix_constants[pixel_id] / (float(tof) * tof_tick_us)
             if q <= 0.0:
                 stats.skipped_unconvertible_events += 1
                 continue
@@ -199,7 +203,7 @@ def accumulate_adara_histogram(
             live_plot_refresh_every,
             stats.packet_count,
         )
-        if histogram_callback is not None:
+        if histogram_callback is not None and stats.packet_count % live_plot_refresh_every == 0:
             histogram_callback(stats.histogram_events, hist)
 
     return stats.packet_count, stats.total_events, stats.histogram_events, hist, stats

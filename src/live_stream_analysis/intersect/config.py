@@ -1,11 +1,18 @@
 from __future__ import annotations
 
-from pathlib import Path
+import dataclasses
 import re
+from pathlib import Path
 
-from intersect_sdk import HierarchyConfig, IntersectClientCallback, IntersectClientConfig, IntersectEventMessageParams, IntersectServiceConfig
-from intersect_sdk_common import ControlPlaneConfig, DataStoreConfig, DataStoreConfigMap
 import yaml
+from intersect_sdk import (
+    HierarchyConfig,
+    IntersectClientCallback,
+    IntersectClientConfig,
+    IntersectEventMessageParams,
+    IntersectServiceConfig,
+)
+from intersect_sdk_common import ControlPlaneConfig, DataStoreConfig, DataStoreConfigMap
 
 from .data_models import IntersectConfig
 
@@ -47,16 +54,16 @@ def build_service_config(config: IntersectConfig) -> IntersectServiceConfig:
             service=hierarchy.get("service", _normalize_hierarchy_name(config.service_name)),
         ),
         brokers=[
-            ControlPlaneConfig(
+            dataclasses.asdict(ControlPlaneConfig(
                 protocol=str(config.broker.get("protocol", "amqp0.9.1")),
                 username=str(config.broker["username"]),
                 password=str(config.broker["password"]),
                 host=str(config.broker.get("host", "127.0.0.1")),
                 port=int(config.broker.get("port", 5672)),
                 is_root=bool(config.broker.get("is_root", True)),
-            )
+            ))
         ],
-        data_stores=DataStoreConfigMap(
+        data_stores=dataclasses.asdict(DataStoreConfigMap(
             minio=[
                 DataStoreConfig(
                     username=str(config.data_store["username"]),
@@ -67,7 +74,7 @@ def build_service_config(config: IntersectConfig) -> IntersectServiceConfig:
             ]
             if config.data_store
             else []
-        ),
+        )),
     )
 
 

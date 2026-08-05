@@ -8,7 +8,7 @@ from live_stream_analysis.intersect.data_models import CsvTextRequest, StartAdar
 from live_stream_analysis.intersect.service import HistogramRuntimeState, LiveStreamAnalysisCapability
 
 
-def test_set_background_updates_live_histogram_state(tmp_path: Path):
+def test_set_background_updates_live_histogram_state(tmp_path: Path):  # noqa: ARG001
     csv_text = "\n".join(
         [
             "Q value,I(Q),Error I(Q)",
@@ -26,7 +26,7 @@ def test_set_background_updates_live_histogram_state(tmp_path: Path):
     assert capability.runtime_state.background_errors == [0.1, 0.2]
 
 
-def test_set_normalization_updates_live_histogram_state(tmp_path: Path):
+def test_set_normalization_updates_live_histogram_state(tmp_path: Path):  # noqa: ARG001
     csv_text = "\n".join(
         [
             "Q value,I(Q),Error I(Q)",
@@ -74,7 +74,7 @@ def test_set_background_rejects_mismatched_runtime_bins():
     capability = LiveStreamAnalysisCapability(runtime_state=runtime_state)
 
     with pytest.raises(ValueError, match="Background correction CSV has 1 bins but expected 1475"):
-        capability.set_background(CsvTextRequest(csv_text="Q value,I\(Q\),Error I\(Q\)\n0.0,0.0,0.0\n".replace("\\(", "(").replace("\\)", ")")))
+        capability.set_background(CsvTextRequest(csv_text="Q value,I\\(Q\\),Error I\\(Q\\)\n0.0,0.0,0.0\n".replace("\\(", "(").replace("\\)", ")")))
 
 
 def test_start_adara_file_read_releases_runtime_gate():

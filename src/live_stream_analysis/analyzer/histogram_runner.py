@@ -9,9 +9,6 @@ import sys
 import time
 from pathlib import Path
 
-from . import nexus
-from .factory import build_reader, create_source_runner
-from .histogram import apply_corrections, load_pixel_q_conversion, validate_histogram_args, write_histogram_csv
 from ..intersect import (
     build_histogram_payload,
     build_run_complete_payload,
@@ -20,6 +17,9 @@ from ..intersect import (
     load_intersect_config,
 )
 from ..intersect.service import HistogramRuntimeState
+from . import nexus
+from .factory import build_reader, create_source_runner
+from .histogram import apply_corrections, load_pixel_q_conversion, validate_histogram_args, write_histogram_csv
 from .live_plot import HistogramPlotter, create_live_histogram_plotter, maybe_update_live_plot
 
 LOGGER = logging.getLogger(__name__)
@@ -291,7 +291,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             histogram_events,
         )
         LOGGER.info("Applying background subtraction and normalization corrections")
-        if any(hist) and not run_completion_handled:
+        if any(hist):
             corrected_hist, corrected_error = _finalize_run(hist)
         else:
             corrected_hist = [0.0] * histogram_bins

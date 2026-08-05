@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import argparse
 
+import pytest
+
 from live_stream_analysis.analyzer.histogram import PixelQConversion, apply_corrections, pixel_tof_to_q
 from live_stream_analysis.intersect.service import HistogramRuntimeState
-import pytest
 
 
 def test_apply_corrections_prefers_runtime_state_over_cli_paths():

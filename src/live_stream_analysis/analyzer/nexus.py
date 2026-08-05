@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import math
 import logging
+import math
 import sys
 from pathlib import Path
 
@@ -78,11 +78,15 @@ def accumulate_nexus_histogram(
     chunk_size: int = DEFAULT_NEXUS_CHUNK_SIZE,
     q_conversion_provider=None,
     histogram_callback=None,
+    hist: list[int] | None = None,
 ) -> tuple[int, int, int, list[int], None]:
     packet_count = 0
     total_events = 0
     histogram_events = 0
-    hist = [0] * histogram_bins
+    if hist is None:
+        hist = [0] * histogram_bins
+    elif len(hist) != histogram_bins:
+        raise ValueError("existing histogram length does not match histogram_bins")
     total_chunks = count_nexus_chunks(nexus_files, chunk_size)
     processed_chunks = 0
     event_log_interval = max(1, event_log_interval)
