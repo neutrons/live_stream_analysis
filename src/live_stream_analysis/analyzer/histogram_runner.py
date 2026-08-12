@@ -291,7 +291,9 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             histogram_events,
         )
         LOGGER.info("Applying background subtraction and normalization corrections")
-        if any(hist) and not run_completion_handled:
+        # _handle_run_complete already zeroes the histogram, so anything left here belongs to a
+        # run that started after the last boundary and still needs finalizing.
+        if any(hist):
             corrected_hist, corrected_error = _finalize_run(hist)
         else:
             corrected_hist = [0.0] * histogram_bins

@@ -15,7 +15,7 @@ except ImportError:  # pragma: no cover
     AdaraLiveStreamReader = None
     AdaraRunStatusPacket = None
 
-from .histogram import PixelQConversion
+from .histogram import PixelQConversion, pixel_tof_to_q
 from .live_plot import HistogramPlotter, maybe_update_live_plot
 
 LOGGER = logging.getLogger(__name__)
@@ -172,8 +172,9 @@ def accumulate_adara_histogram(
                 stats.skipped_masked_pixels += 1
                 continue
 
-            q = (active_q_conversion.q_matrix_constants[pixel_id] * tof_tick_us) / float(tof)
-            if q <= 0.0:
+            # Share the NeXus conversion so DIFA/DIFC/TZERO calibration is honoured here too.
+            q = pixel_tof_to_q(active_q_conversion, pixel_id, float(tof) * tof_tick_us)
+            if q is None or q <= 0.0:
                 stats.skipped_unconvertible_events += 1
                 continue
             bram_index = int((q - histogram_q_min) * q_index_scale)

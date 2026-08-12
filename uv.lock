@@ -1151,7 +1151,7 @@ wheels = [
 
 [[package]]
 name = "intersect-sdk"
-version = "0.9.1"
+version = "0.9.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "intersect-sdk-common" },
@@ -1159,9 +1159,9 @@ dependencies = [
     { name = "psutil" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/78/d3/4dacd5ebd1a838d3e234cfde6ef3c76e15cfc9822c130bc5813633dab97d/intersect_sdk-0.9.1.tar.gz", hash = "sha256:0a4aaf1daa1feec963907f8db2af8202e539e715d7a4d616b2a660fd5513cde5", size = 54143, upload-time = "2026-06-02T23:12:03.7Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ad/4a/4197405ffa4d42913d3358cf34d1b0ec15a841c994c5931b3785a975a86a/intersect_sdk-0.9.3.tar.gz", hash = "sha256:b0f563ae161f7851c1281fd4023222ce6509af33fae371f776470d1767dcfb7c", size = 54468, upload-time = "2026-06-23T16:02:18.534Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/37/67/72cf766723a13003be5b60caefbbcbcf91171d98723b698dcf8507512b33/intersect_sdk-0.9.1-py3-none-any.whl", hash = "sha256:9d22b70058d2e629809cacf8be1e6e1d2bded93c503140958517e155537fe1eb", size = 66428, upload-time = "2026-06-02T23:12:04.826Z" },
+    { url = "https://files.pythonhosted.org/packages/f0/53/a2fb84ca204d3b794c6c9e93487d38169a075b9422ca27d5b95a794528c2/intersect_sdk-0.9.3-py3-none-any.whl", hash = "sha256:d02b87b07134de96e060054750cd82445334a573f5df34a451d4d786118c904b", size = 66750, upload-time = "2026-06-23T16:02:17.437Z" },
 ]
 
 [[package]]
@@ -1833,7 +1833,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "h5py", specifier = ">=3.16.0" },
-    { name = "intersect-sdk" },
+    { name = "intersect-sdk", specifier = "==0.9.3" },
     { name = "matplotlib", specifier = ">=3.10.9" },
     { name = "myst-parser", marker = "extra == 'docs'" },
     { name = "numpy", specifier = ">=2.2.6,<3" },
