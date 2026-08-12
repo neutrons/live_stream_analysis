@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import socketserver
 import sys
 import threading
@@ -13,6 +14,9 @@ from urllib.parse import urlparse
 
 import matplotlib
 import matplotlib.pyplot as plt
+
+
+logger = logging.getLogger(__name__)
 
 
 class HistogramPlotter(Protocol):
@@ -79,25 +83,28 @@ class _BrowserPlotState:
 class _BrowserPlotRequestHandler(BaseHTTPRequestHandler):
     server: "_BrowserPlotServer"
 
+    def _write_response(self, body: bytes, content_type: str) -> None:
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        if content_type == "application/json":
+            self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, socketserver.socket.error):
+            logger.debug("Browser live plot client disconnected before response completed")
+
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path == "/":
             body = self.server.html.encode("utf-8")
-            self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._write_response(body, "text/html; charset=utf-8")
             return
 
         if parsed.path == "/state":
             body = json.dumps(self.server.state.snapshot()).encode("utf-8")
-            self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._write_response(body, "application/json")
             return
 
         self.send_error(HTTPStatus.NOT_FOUND)

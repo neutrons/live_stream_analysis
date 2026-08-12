@@ -641,6 +641,7 @@ class TestAdaraFileCLI:
                 histogram_callback=None,
                 run_complete_callback=None,
                 histogram_state_callback=None,
+                hist=None,
             ):
                 _ = (reader, args, q_conversion, histogram_bins, plotter, chunk_size, q_conversion_provider, histogram_callback)
                 hist = [0] * 5000
@@ -828,8 +829,8 @@ class TestAdaraFileCLI:
         created: list[tuple[str, int, bool]] = []
 
         class _StubBrowserPlotter:
-            def __init__(self, q_bin_size: float, histogram_bins: int, host: str, port: int, open_browser: bool):
-                _ = (q_bin_size, histogram_bins)
+            def __init__(self, q_min: float, q_bin_size: float, histogram_bins: int, host: str, port: int, open_browser: bool):
+                _ = (q_min, q_bin_size, histogram_bins)
                 created.append((host, port, open_browser))
 
             def update(self, _intensity, _error, _relative_uncertainty):

@@ -15,11 +15,12 @@ except ImportError:  # pragma: no cover
     AdaraLiveStreamReader = None
     AdaraRunStatusPacket = None
 
-from .histogram import PixelQConversion
+from .histogram import PixelQConversion, pixel_tof_to_q
 from .live_plot import HistogramPlotter, maybe_update_live_plot
 
 LOGGER = logging.getLogger(__name__)
 
+ADARA_RUN_STATUS_NEW_RUN = 1
 ADARA_RUN_STATUS_END_RUN = 4
 ADARA_BANKED_EVENT_FORMAT = 0x400001
 
@@ -34,17 +35,22 @@ def _safe_packet_attr(packet, attr: str):
     return value if value is not None else '<missing>'
 
 
-def _is_end_run_status_packet(packet) -> bool:
+def _run_status(packet) -> int | None:
+    """Return the run status of a genuine ADARA run-status packet, otherwise None.
+
+    The type check matters: other packet types expose get_status() too (AdaraDoublePacket
+    reports 1 for some device readings), and treating those as run boundaries wipes the
+    live histogram mid-run.
+    """
+    if AdaraRunStatusPacket is not None and not isinstance(packet, AdaraRunStatusPacket):
+        return None
     status_getter = getattr(packet, "get_status", None)
     if status_getter is None:
-        return False
+        return None
     try:
-        status = status_getter()
+        return status_getter()
     except Exception:
-        return False
-    if status != ADARA_RUN_STATUS_END_RUN:
-        return False
-    return AdaraRunStatusPacket is None or isinstance(packet, AdaraRunStatusPacket)
+        return None
 
 
 @dataclass
@@ -106,9 +112,13 @@ def accumulate_adara_histogram(
     histogram_callback=None,
     run_complete_callback=None,
     histogram_state_callback=None,
+    hist: list[int] | None = None,
 ) -> tuple[int, int, int, list[int], AdaraHistogramStats]:
     stats = AdaraHistogramStats()
-    hist = [0] * histogram_bins
+    if hist is None:
+        hist = [0] * histogram_bins
+    elif len(hist) != histogram_bins:
+        raise ValueError("existing histogram length does not match histogram_bins")
     if histogram_q_bin_size <= 0.0:
         raise ValueError("histogram_q_bin_size must be > 0")
     q_index_scale = 1.0 / histogram_q_bin_size
@@ -119,7 +129,34 @@ def accumulate_adara_histogram(
 
     for packet in reader.read_generator():
         stats.packet_count += 1
-        if run_complete_callback is not None and _is_end_run_status_packet(packet):
+        run_status = _run_status(packet)
+
+        if run_status == ADARA_RUN_STATUS_NEW_RUN:
+            # A new run is starting. Drop whatever the previous run left behind so the two
+            # never blend, but keep reading -- only END_RUN completes a run. Run files open
+            # with a NEW_RUN packet, so treating this as a completion would end the read
+            # before a single event was seen.
+            discarded = sum(hist)
+            if discarded:
+                LOGGER.info(
+                    "Received ADARA NEW_RUN status packet after %s packets; discarding %s counts from the previous run",
+                    stats.packet_count,
+                    discarded,
+                )
+            hist[:] = [0] * len(hist)
+            maybe_update_live_plot(
+                plotter,
+                hist,
+                [0.0] * len(hist),
+                live_plot_refresh_every,
+                stats.packet_count,
+                force=True,
+            )
+            if histogram_callback is not None:
+                histogram_callback(0, hist)
+            continue
+
+        if run_complete_callback is not None and run_status == ADARA_RUN_STATUS_END_RUN:
             maybe_update_live_plot(
                 plotter,
                 hist,
@@ -131,7 +168,7 @@ def accumulate_adara_histogram(
             if histogram_callback is not None:
                 histogram_callback(stats.histogram_events, hist)
             LOGGER.info(
-                "Received ADARA end-run status packet after %s packets (%s total source events): packet_type=%s status=%s run_number=%s run_start=%s file_number=%s",
+                "Received ADARA END_RUN status packet after %s packets (%s total source events): packet_type=%s status=%s run_number=%s run_start=%s file_number=%s",
                 stats.packet_count,
                 stats.total_events,
                 type(packet).__name__,
@@ -141,7 +178,7 @@ def accumulate_adara_histogram(
                 _safe_packet_attr(packet, 'get_file_number'),
             )
             run_complete_callback(packet)
-            break
+            return stats.packet_count, stats.total_events, stats.histogram_events, hist, stats
 
         if getattr(packet, "get_format_int", None) is not None:
             if packet.get_format_int() != ADARA_BANKED_EVENT_FORMAT:
@@ -169,8 +206,9 @@ def accumulate_adara_histogram(
                 stats.skipped_masked_pixels += 1
                 continue
 
-            q = (active_q_conversion.q_matrix_constants[pixel_id] * tof_tick_us) / float(tof)
-            if q <= 0.0:
+            # Share the NeXus conversion so DIFA/DIFC/TZERO calibration is honoured here too.
+            q = pixel_tof_to_q(active_q_conversion, pixel_id, float(tof) * tof_tick_us)
+            if q is None or q <= 0.0:
                 stats.skipped_unconvertible_events += 1
                 continue
             bram_index = int((q - histogram_q_min) * q_index_scale)

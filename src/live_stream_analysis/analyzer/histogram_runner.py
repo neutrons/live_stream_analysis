@@ -48,6 +48,9 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
     packet_count = 0
     total_events = 0
     histogram_events = 0
+    cumulative_packet_count = 0
+    cumulative_total_events = 0
+    cumulative_histogram_events = 0
     try:
         LOGGER.info("Starting histogram analysis")
         histogram_bins = validate_histogram_args(args)
@@ -140,6 +143,12 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 next_snapshot_event_count += args.histogram_snapshot_every
 
         def _finalize_run(hist: list[int]) -> tuple[list[float], list[float]]:
+            LOGGER.info(
+                "Finalizing histogram: bins=%s total_counts=%.0f run_completion_handled=%s",
+                len(hist),
+                float(sum(hist)),
+                run_completion_handled,
+            )
             final_hist, final_error = apply_corrections(hist, args, histogram_bins, runtime_state=runtime_state)
             maybe_update_live_plot(
                 plotter,
@@ -148,6 +157,11 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 args.live_plot_refresh_every,
                 1,
                 force=True,
+            )
+            LOGGER.info(
+                "Forced live plot refresh with finalized histogram: bins=%s total_counts=%.0f",
+                len(final_hist),
+                float(sum(final_hist)),
             )
             if publisher is not None and intersect_config is not None:
                 q_values = [args.histogram_q_min + (index * args.histogram_q_bin_size) for index in range(len(final_hist))]
@@ -170,11 +184,19 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
         def _handle_run_complete(_packet) -> None:
             nonlocal corrected_hist, corrected_error, run_completion_handled
             if run_completion_handled:
+                LOGGER.info("Ignoring duplicate run-complete callback because run_completion_handled is already true")
                 return
             if active_hist is None:
+                LOGGER.warning("Received run-complete callback but active_hist is not set")
                 return
+            LOGGER.info("Received run-complete callback; finalizing active histogram before continuing")
             corrected_hist, corrected_error = _finalize_run(active_hist)
             run_completion_handled = True
+            LOGGER.info(
+                "Run-complete callback finished; run_completion_handled=%s active_hist_total_before_reset=%.0f",
+                run_completion_handled,
+                float(sum(active_hist)),
+            )
             active_hist[:] = [0] * len(active_hist)
 
         def _set_active_hist(hist: list[int]) -> None:
@@ -194,6 +216,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 histogram_callback=_publish_histogram_snapshot,
                 run_complete_callback=_handle_run_complete,
                 histogram_state_callback=_set_active_hist,
+                hist=active_hist,
             )
             if len(accumulation_result) == 5:
                 packet_count, total_events, histogram_events, hist, adara_stats = accumulation_result
@@ -206,8 +229,27 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                     f"(got {len(accumulation_result)})"
                 )
 
-            if args.adara_stream is None or run_completion_handled:
+            cumulative_packet_count += packet_count
+            cumulative_total_events += total_events
+            cumulative_histogram_events += histogram_events
+
+            LOGGER.info(
+                "ADARA accumulate_histogram returned: packets=%s total_events=%s histogrammed_events=%s run_completion_handled=%s active_hist_is_set=%s active_hist_total=%.0f",
+                packet_count,
+                total_events,
+                histogram_events,
+                run_completion_handled,
+                active_hist is not None,
+                float(sum(active_hist)) if active_hist is not None else 0.0,
+            )
+
+            if args.adara_stream is None:
                 break
+
+            if run_completion_handled:
+                LOGGER.info("ADARA live stream run completed; histogram state reset and stream will continue")
+                run_completion_handled = False
+                continue
 
             reconnect_attempts += 1
             max_reconnects = args.adara_stream_max_reconnects
@@ -217,12 +259,28 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 )
 
             LOGGER.warning(
-                "ADARA live stream disconnected before END_RUN after %s packets (%s total source events); reconnect attempt %s",
+                "ADARA live stream disconnected before END_RUN after %s packets (%s total source events); reconnect attempt %s; cumulative packets=%s cumulative source events=%s cumulative histogrammed events=%s",
                 packet_count,
                 total_events,
                 reconnect_attempts,
+                cumulative_packet_count,
+                cumulative_total_events,
+                cumulative_histogram_events,
             )
-            time.sleep(max(0.0, args.adara_stream_reconnect_delay))
+            reconnect_delay = max(0.0, args.adara_stream_reconnect_delay)
+            LOGGER.info(
+                "Sleeping %.3f seconds before reconnecting to ADARA live stream %s:%s",
+                reconnect_delay,
+                args.adara_stream[0],
+                args.adara_stream[1],
+            )
+            time.sleep(reconnect_delay)
+            LOGGER.info(
+                "Reconnecting to ADARA live stream %s:%s (attempt %s)",
+                args.adara_stream[0],
+                args.adara_stream[1],
+                reconnect_attempts,
+            )
             reader = build_reader(args)
 
         active_hist = hist
@@ -233,7 +291,9 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             histogram_events,
         )
         LOGGER.info("Applying background subtraction and normalization corrections")
-        if any(hist) and not run_completion_handled:
+        # _handle_run_complete already zeroes the histogram, so anything left here belongs to a
+        # run that started after the last boundary and still needs finalizing.
+        if any(hist):
             corrected_hist, corrected_error = _finalize_run(hist)
         else:
             corrected_hist = [0.0] * histogram_bins

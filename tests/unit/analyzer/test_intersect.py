@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from intersect_sdk import get_schema_from_capability_implementations
-from intersect_sdk_common import HierarchyConfig
+from intersect_sdk import HierarchyConfig
 
 from live_stream_analysis.intersect import (
     IntersectConfig,

@@ -4,7 +4,6 @@ from pathlib import Path
 import re
 
 from intersect_sdk import HierarchyConfig, IntersectClientCallback, IntersectClientConfig, IntersectEventMessageParams, IntersectServiceConfig
-from intersect_sdk_common import ControlPlaneConfig, DataStoreConfig, DataStoreConfigMap
 import yaml
 
 from .data_models import IntersectConfig
@@ -47,27 +46,27 @@ def build_service_config(config: IntersectConfig) -> IntersectServiceConfig:
             service=hierarchy.get("service", _normalize_hierarchy_name(config.service_name)),
         ),
         brokers=[
-            ControlPlaneConfig(
-                protocol=str(config.broker.get("protocol", "amqp0.9.1")),
-                username=str(config.broker["username"]),
-                password=str(config.broker["password"]),
-                host=str(config.broker.get("host", "127.0.0.1")),
-                port=int(config.broker.get("port", 5672)),
-                is_root=bool(config.broker.get("is_root", True)),
-            )
+            {
+                "protocol": str(config.broker.get("protocol", "amqp0.9.1")),
+                "username": str(config.broker["username"]),
+                "password": str(config.broker["password"]),
+                "host": str(config.broker.get("host", "127.0.0.1")),
+                "port": int(config.broker.get("port", 5672)),
+                "is_root": bool(config.broker.get("is_root", True)),
+            }
         ],
-        data_stores=DataStoreConfigMap(
-            minio=[
-                DataStoreConfig(
-                    username=str(config.data_store["username"]),
-                    password=str(config.data_store["password"]),
-                    host=str(config.data_store.get("host", "127.0.0.1")),
-                    port=int(config.data_store.get("port", 9000)),
-                )
+        data_stores={
+            "minio": [
+                {
+                    "username": str(config.data_store["username"]),
+                    "password": str(config.data_store["password"]),
+                    "host": str(config.data_store.get("host", "127.0.0.1")),
+                    "port": int(config.data_store.get("port", 9000)),
+                }
             ]
             if config.data_store
             else []
-        ),
+        },
     )
 
 

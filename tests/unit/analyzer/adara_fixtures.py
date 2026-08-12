@@ -27,11 +27,21 @@ def null_packet(format_int: int = 0, timestamp_s: int = 0) -> bytes:
 
 
 def event_packet(events: list[tuple[int, int]], timestamp_s: int = 2) -> bytes:
-    """Build an AdaraEventPacket (format_int=0x300) with (pixid, tof) events."""
-    header_meta = b"\x00" * 24
-    events_b = b"".join(struct.pack("<II", pixid, tof) for pixid, tof in events)
-    payload = header_meta + events_b
-    return _pack_header(len(payload), 0x300, timestamp_s) + payload
+    """Build an AdaraBankedEventPacket (format_int=0x400001) with (pixid, tof) events.
+
+    Events are given as (pixel_id, tof) tuples to match the ADARA naming convention used in
+    higher-level tests, but are packed in (tof, pixel_id) order as required by the banked format.
+    """
+    # Each event is packed as (tof, pixel_id) -- the order returned by AdaraBankedEventPacket.get_events()
+    events_b = b"".join(struct.pack("<II", tof, pixid) for pixid, tof in events)
+    # One bank section: bank_id=0, event_count, then events
+    bank_section = struct.pack("<II", 0, len(events)) + events_b
+    # One source section: source_id=0, intra_pulse_time=0, tof_offset_cor=0, bank_count=1
+    source_section = struct.pack("<IIII", 0, 0, 0, 1) + bank_section
+    # 16 bytes of banked event metadata (charge, energy, etc.) -- all zeros for tests
+    banked_meta = b"\x00" * 16
+    payload = banked_meta + source_section
+    return _pack_header(len(payload), 0x400001, timestamp_s) + payload
 
 
 def run_status_packet(
@@ -46,6 +56,6 @@ def run_status_packet(
     addendum: int = 0,
     timestamp_s: int = 0,
 ) -> bytes:
-    """Build an AdaraRunStatusPacket (base format_int=0x400001)."""
+    """Build an AdaraRunStatusPacket (format_int=0x400301)."""
     payload = struct.pack("<IIIII", run_number, run_start, (status << 24) | file_number, (paused << 24) | pause_file_number, (addendum << 24) | addendum_file_number)
-    return _pack_header(len(payload), 0x400001, timestamp_s)
+    return _pack_header(len(payload), 0x400301, timestamp_s)

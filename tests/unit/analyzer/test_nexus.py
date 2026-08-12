@@ -53,7 +53,7 @@ def test_accumulate_nexus_histogram_counts_events_into_expected_bin(tmp_path: Pa
         use=[1, 1],
     )
 
-    packet_count, total_events, histogram_events, hist = accumulate_nexus_histogram(
+    packet_count, total_events, histogram_events, hist, _stats = accumulate_nexus_histogram(
         nexus_files=[str(nexus_path)],
         q_conversion=q_conversion,
         histogram_bins=600,

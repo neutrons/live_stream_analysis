@@ -3,13 +3,13 @@ name = "live_stream_analysis"
 description = "Python repo for live stream analysis neutrons"
 version = "0.2.0"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = { text = "BSD-3-Clause" }
 keywords = ["neutrons", "python"]
 readme = "README.md"
 dependencies = [
   "h5py>=3.16.0",
-  "intersect-sdk==0.9.0",
-  "intersect-sdk-common==0.9.5",
+  # intersect-sdk-common is pulled in transitively; do not pin it separately.
+  "intersect-sdk==0.9.3",
   # Dependencies available from both PyPI and conda should be listed here
   "matplotlib>=3.10.9",
   "numpy>=2.2.6,<3",

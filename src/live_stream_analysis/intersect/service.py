@@ -1,5 +1,7 @@
 import csv
 import io
+import logging
+import queue
 import threading
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Protocol
@@ -23,6 +25,8 @@ from .data_models import (
     StartAdaraFileReadResponse,
     UpdateResponse,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 
 class EventPublisher(Protocol):
@@ -180,13 +184,41 @@ class IntersectEventPublisher:
         self._config = config
         self._capability = LiveStreamAnalysisCapability(runtime_state=runtime_state)
         self._service = IntersectService([self._capability], build_service_config(config))
+        self._queue: queue.Queue[tuple[str, dict[str, Any]] | None] = queue.Queue(maxsize=8)
+        self._worker = threading.Thread(target=self._publish_worker, name="intersect-event-publisher", daemon=True)
         self._service.startup()
+        self._worker.start()
 
     def publish_event(self, event_name: str, payload: dict[str, Any]) -> None:
-        self._capability.intersect_sdk_emit_event(_event_key_for_name(self._config, event_name), payload)
+        try:
+            self._queue.put_nowait((event_name, payload))
+        except queue.Full:
+            try:
+                dropped = self._queue.get_nowait()
+            except queue.Empty:
+                dropped = None
+            if dropped is not None:
+                LOGGER.warning(
+                    "Dropping stale INTERSECT event '%s' due to publisher backpressure",
+                    dropped[0],
+                )
+            self._queue.put_nowait((event_name, payload))
 
     def close(self) -> None:
+        self._queue.put(None)
+        self._worker.join(timeout=2.0)
         self._service.shutdown(reason="live-stream-analysis shutdown")
+
+    def _publish_worker(self) -> None:
+        while True:
+            item = self._queue.get()
+            if item is None:
+                return
+            event_name, payload = item
+            try:
+                self._capability.intersect_sdk_emit_event(_event_key_for_name(self._config, event_name), payload)
+            except Exception:
+                LOGGER.exception("Failed to publish INTERSECT event '%s'", event_name)
 
 
 def create_event_publisher(
