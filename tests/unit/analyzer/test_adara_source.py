@@ -92,9 +92,18 @@ def test_accumulate_adara_histogram_uses_ehsan_default_tof_then_pixel_tuple_orde
     assert stats.skipped_invalid_pixel_ids == 1
 
 
-def test_accumulate_adara_histogram_calls_run_complete_callback_only_for_run_boundaries(monkeypatch: pytest.MonkeyPatch):
+def test_accumulate_adara_histogram_calls_run_complete_callback_only_for_end_run(monkeypatch: pytest.MonkeyPatch):
+    """Only END_RUN completes a run; STATE and NEW_RUN must not fire the callback."""
     monkeypatch.setattr("live_stream_analysis.analyzer.adara.AdaraRunStatusPacket", _RunStatusPacket)
-    reader = _Reader([_RunStatusPacket(5), _Packet([(1, 100)]), _RunStatusPacket(1), _Packet([(100, 1)])])
+    reader = _Reader(
+        [
+            _RunStatusPacket(5),
+            _Packet([(1, 100)]),
+            _RunStatusPacket(1),
+            _Packet([(100, 1)]),
+            _RunStatusPacket(4),
+        ]
+    )
     q_conversion = PixelQConversion(
         q_matrix_constants=[0.0, 1000.0],
         difc=[0.0, 1000.0 / (2.0 * 3.141592653589793)],
@@ -117,13 +126,13 @@ def test_accumulate_adara_histogram_calls_run_complete_callback_only_for_run_bou
         run_complete_callback=completed_packets.append,
     )
 
-    assert packet_count == 3
-    assert total_events == 1
-    assert histogram_events == 0
-    assert sum(hist) == 0
+    assert packet_count == 5
+    assert total_events == 2
+    assert histogram_events == 1
+    assert sum(hist) == 1
     assert len(completed_packets) == 1
-    assert completed_packets[0].get_status() == 1
-    assert stats.packet_count == 3
+    assert completed_packets[0].get_status() == 4
+    assert stats.packet_count == 5
 
 
 def test_accumulate_adara_histogram_detects_end_run_from_status_accessor_without_exact_packet_type(
@@ -222,8 +231,59 @@ def test_accumulate_adara_histogram_returns_at_end_run(monkeypatch: pytest.Monke
     assert stats.packet_count == 2
 
 
-def test_accumulate_adara_histogram_returns_at_new_run(monkeypatch: pytest.MonkeyPatch):
-    """NEW_RUN is treated as a run boundary too, so a fresh run never bleeds into the old histogram."""
+def test_accumulate_adara_histogram_ignores_run_status_lookalike_packets(monkeypatch: pytest.MonkeyPatch):
+    """Packets that merely expose get_status() must never be read as run boundaries.
+
+    Real NOMAD streams carry AdaraDoublePacket device readings whose get_status() returns 1,
+    which would otherwise wipe the live histogram several times per run.
+    """
+
+    class _DoublePacket(_Packet):
+        def __init__(self, status: int):
+            super().__init__([(100, 1)])
+            self._status = status
+
+        def get_status(self):
+            return self._status
+
+    monkeypatch.setattr("live_stream_analysis.analyzer.adara.AdaraRunStatusPacket", _RunStatusPacket)
+    reader = _Reader([_DoublePacket(1), _DoublePacket(4), _Packet([(100, 1)])])
+    q_conversion = PixelQConversion(
+        q_matrix_constants=[0.0, 1000.0],
+        difc=[0.0, 0.0],
+        difa=[0.0, 0.0],
+        tzero=[0.0, 0.0],
+        use=[1, 1],
+    )
+    completed_packets: list[_Packet] = []
+
+    packet_count, total_events, histogram_events, hist, _stats = accumulate_adara_histogram(
+        reader=reader,
+        q_conversion=q_conversion,
+        histogram_bins=600,
+        histogram_q_min=0.0,
+        histogram_q_bin_size=0.02,
+        tof_tick_us=1.0,
+        plotter=NullHistogramPlotter(),
+        live_plot_refresh_every=1000,
+        event_log_interval=100_000,
+        run_complete_callback=completed_packets.append,
+    )
+
+    assert packet_count == 3
+    assert total_events == 3
+    assert histogram_events == 3
+    # Nothing was treated as a boundary, so no reset and no completion.
+    assert hist[500] == 3
+    assert completed_packets == []
+
+
+def test_accumulate_adara_histogram_resets_but_keeps_reading_at_new_run(monkeypatch: pytest.MonkeyPatch):
+    """NEW_RUN clears the previous run's counts but must not end the read.
+
+    Run files open with a NEW_RUN packet, so completing the run here would stop the read
+    before any events were seen.
+    """
     monkeypatch.setattr("live_stream_analysis.analyzer.adara.AdaraRunStatusPacket", _RunStatusPacket)
     reader = _Reader([
         _Packet([(100, 1)]),
@@ -254,16 +314,14 @@ def test_accumulate_adara_histogram_returns_at_new_run(monkeypatch: pytest.Monke
         run_complete_callback=completed_packets.append,
     )
 
-    assert packet_count == 2
-    assert total_events == 1
-    assert histogram_events == 1
+    assert packet_count == 3
+    assert total_events == 2
+    assert histogram_events == 2
+    # The first run's count was discarded at the boundary; only the second one survives.
     assert sum(hist) == 1
     assert hist[500] == 1
-    assert len(completed_packets) == 1
-    assert completed_packets[0].get_status() == 1
-    assert histogram_snapshots[-1][0] == 1
-    assert sum(histogram_snapshots[-1][1]) == 1
-    assert stats.packet_count == 2
+    assert completed_packets == []
+    assert stats.packet_count == 3
 
 
 def test_accumulate_adara_histogram_ignores_non_banked_event_packets():

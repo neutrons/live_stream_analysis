@@ -35,15 +35,22 @@ def _safe_packet_attr(packet, attr: str):
     return value if value is not None else '<missing>'
 
 
-def _is_run_boundary_status_packet(packet) -> bool:
+def _run_status(packet) -> int | None:
+    """Return the run status of a genuine ADARA run-status packet, otherwise None.
+
+    The type check matters: other packet types expose get_status() too (AdaraDoublePacket
+    reports 1 for some device readings), and treating those as run boundaries wipes the
+    live histogram mid-run.
+    """
+    if AdaraRunStatusPacket is not None and not isinstance(packet, AdaraRunStatusPacket):
+        return None
     status_getter = getattr(packet, "get_status", None)
     if status_getter is None:
-        return False
+        return None
     try:
-        status = status_getter()
+        return status_getter()
     except Exception:
-        return False
-    return status in {ADARA_RUN_STATUS_NEW_RUN, ADARA_RUN_STATUS_END_RUN}
+        return None
 
 
 @dataclass
@@ -122,7 +129,34 @@ def accumulate_adara_histogram(
 
     for packet in reader.read_generator():
         stats.packet_count += 1
-        if run_complete_callback is not None and _is_run_boundary_status_packet(packet):
+        run_status = _run_status(packet)
+
+        if run_status == ADARA_RUN_STATUS_NEW_RUN:
+            # A new run is starting. Drop whatever the previous run left behind so the two
+            # never blend, but keep reading -- only END_RUN completes a run. Run files open
+            # with a NEW_RUN packet, so treating this as a completion would end the read
+            # before a single event was seen.
+            discarded = sum(hist)
+            if discarded:
+                LOGGER.info(
+                    "Received ADARA NEW_RUN status packet after %s packets; discarding %s counts from the previous run",
+                    stats.packet_count,
+                    discarded,
+                )
+            hist[:] = [0] * len(hist)
+            maybe_update_live_plot(
+                plotter,
+                hist,
+                [0.0] * len(hist),
+                live_plot_refresh_every,
+                stats.packet_count,
+                force=True,
+            )
+            if histogram_callback is not None:
+                histogram_callback(0, hist)
+            continue
+
+        if run_complete_callback is not None and run_status == ADARA_RUN_STATUS_END_RUN:
             maybe_update_live_plot(
                 plotter,
                 hist,
@@ -134,7 +168,7 @@ def accumulate_adara_histogram(
             if histogram_callback is not None:
                 histogram_callback(stats.histogram_events, hist)
             LOGGER.info(
-                "Received ADARA run-boundary status packet after %s packets (%s total source events): packet_type=%s status=%s run_number=%s run_start=%s file_number=%s",
+                "Received ADARA END_RUN status packet after %s packets (%s total source events): packet_type=%s status=%s run_number=%s run_start=%s file_number=%s",
                 stats.packet_count,
                 stats.total_events,
                 type(packet).__name__,
