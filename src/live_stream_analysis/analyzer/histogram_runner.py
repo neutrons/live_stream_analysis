@@ -11,7 +11,13 @@ from pathlib import Path
 
 from . import nexus
 from .factory import build_reader, create_source_runner
-from .histogram import apply_corrections, load_pixel_q_conversion, validate_histogram_args, write_histogram_csv
+from .histogram import (
+    apply_corrections,
+    bin_centre_q_values,
+    load_pixel_q_conversion,
+    validate_histogram_args,
+    write_histogram_csv,
+)
 from ..intersect import (
     build_histogram_payload,
     build_run_complete_payload,
@@ -27,6 +33,27 @@ LOGGER = logging.getLogger(__name__)
 
 def _should_keep_live_plot_open(args: argparse.Namespace) -> bool:
     return bool(getattr(args, "live_plot_mode", None) == "browser" and getattr(args, "live_plot_keep_open", False))
+
+
+def _write_histogram_output(
+    corrected_hist: list[float],
+    corrected_error: list[float],
+    args: argparse.Namespace,
+) -> bool:
+    """Write the histogram CSV, returning False if it could not be written."""
+    try:
+        LOGGER.info("Writing histogram CSV to %s", Path(args.histogram_output_csv).resolve())
+        write_histogram_csv(
+            corrected_hist,
+            corrected_error,
+            args.histogram_output_csv,
+            args.histogram_q_bin_size,
+            args.histogram_q_min,
+        )
+    except OSError as exc:
+        print(f"Error writing histogram output: {exc}", file=sys.stderr)
+        return False
+    return True
 
 
 def _configure_logging(args: argparse.Namespace) -> None:
@@ -45,6 +72,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
     active_hist: list[int] | None = None
     next_snapshot_event_count = max(1, args.histogram_snapshot_every) if args.histogram_snapshot_every > 0 else None
     adara_stats = None
+    histogram_csv_written = False
     packet_count = 0
     total_events = 0
     histogram_events = 0
@@ -110,7 +138,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 interval = max(1, intersect_config.publish_interval_seconds)
                 if last_intersect_publish_at is None or (now - last_intersect_publish_at) >= interval:
                     last_intersect_publish_at = now
-                    q_values = [args.histogram_q_min + (index * args.histogram_q_bin_size) for index in range(len(hist))]
+                    q_values = bin_centre_q_values(args.histogram_q_min, args.histogram_q_bin_size, len(hist))
                     errors = [math.sqrt(float(value)) for value in hist]
                     payload = build_histogram_payload(q_values, [float(value) for value in hist], errors)
                     LOGGER.info(
@@ -164,7 +192,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 float(sum(final_hist)),
             )
             if publisher is not None and intersect_config is not None:
-                q_values = [args.histogram_q_min + (index * args.histogram_q_bin_size) for index in range(len(final_hist))]
+                q_values = bin_centre_q_values(args.histogram_q_min, args.histogram_q_bin_size, len(final_hist))
                 publisher.publish_event(
                     intersect_config.histogram_event_name,
                     build_histogram_payload(q_values, final_hist, final_error),
@@ -299,6 +327,13 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             corrected_hist = [0.0] * histogram_bins
             corrected_error = [0.0] * histogram_bins
         LOGGER.info("Final histogram update complete")
+        # Write the CSV before blocking on the live plot. --live-plot-keep-open parks the
+        # process until it is interrupted, so deferring the write would leave the caller
+        # with no output file for as long as the plot stays up.
+        if args.histogram_output_csv is not None:
+            if not _write_histogram_output(corrected_hist, corrected_error, args):
+                return 1
+            histogram_csv_written = True
         if plotter is not None and _should_keep_live_plot_open(args):
             LOGGER.info("Keeping browser live plot available at %s until interrupted", getattr(plotter, "url", "configured host/port"))
             plotter.wait_until_closed()
@@ -314,18 +349,8 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
         if publisher is not None:
             publisher.close()
 
-    if args.histogram_output_csv is not None:
-        try:
-            LOGGER.info("Writing histogram CSV to %s", Path(args.histogram_output_csv).resolve())
-            write_histogram_csv(
-                corrected_hist,
-                corrected_error,
-                args.histogram_output_csv,
-                args.histogram_q_bin_size,
-                args.histogram_q_min,
-            )
-        except OSError as exc:
-            print(f"Error writing histogram output: {exc}", file=sys.stderr)
+    if args.histogram_output_csv is not None and not histogram_csv_written:
+        if not _write_histogram_output(corrected_hist, corrected_error, args):
             return 1
 
     print(f"Packets read         : {packet_count}")

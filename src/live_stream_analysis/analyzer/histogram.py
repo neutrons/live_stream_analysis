@@ -125,6 +125,16 @@ def pixel_tof_to_q(conversion: PixelQConversion, pixel_id: int, tof_us: float) -
     return TWO_PI / d_spacing
 
 
+def bin_centre_q_values(q_min: float, q_bin_size: float, bins: int) -> list[float]:
+    """Return the Q value at the centre of each histogram bin.
+
+    Every consumer of a histogram -- CSV output, live plots, INTERSECT payloads -- must
+    label bins the same way, otherwise the same peak reports a different Q in each place.
+    Bin centres are the convention; a count in [q, q + dq) is reported at q + dq/2.
+    """
+    return [q_min + (index + 0.5) * q_bin_size for index in range(bins)]
+
+
 def write_histogram_csv(
     intensity: list[float],
     error: list[float],
@@ -134,11 +144,11 @@ def write_histogram_csv(
 ) -> None:
     path = Path(output_path).resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
+    q_values = bin_centre_q_values(q_min, q_bin_size, len(intensity))
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(["Q value", "I(Q)", "Error I(Q)"])
-        for index, (y_value, err_value) in enumerate(zip(intensity, error, strict=True)):
-            q_value = q_min + (index + 0.5) * q_bin_size
+        for q_value, y_value, err_value in zip(q_values, intensity, error, strict=True):
             writer.writerow([f"{q_value:.8f}", f"{y_value:.8f}", f"{err_value:.8f}"])
 
 
