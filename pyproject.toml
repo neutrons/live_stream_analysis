@@ -3,7 +3,7 @@ name = "live_stream_analysis"
 description = "Python repo for live stream analysis neutrons"
 version = "0.2.0"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = { text = "BSD-3-Clause" }
 keywords = ["neutrons", "python"]
 readme = "README.md"
 dependencies = [

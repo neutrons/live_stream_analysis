@@ -1,5 +1,10 @@
 # live stream analysis
 
+[![Tests and Deployment](https://github.com/neutrons/live_stream_analysis/actions/workflows/test_and_deploy.yaml/badge.svg?branch=main)](https://github.com/neutrons/live_stream_analysis/actions/workflows/test_and_deploy.yaml?query=branch%3Amain)
+[![Docker](https://github.com/neutrons/live_stream_analysis/actions/workflows/publish-to-ghcr.yml/badge.svg?branch=main)](https://github.com/neutrons/live_stream_analysis/actions/workflows/publish-to-ghcr.yml?query=branch%3Amain)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/license-BSD--3--Clause-green)](https://opensource.org/licenses/BSD-3-Clause)
+
 Repository for working on live stream analysis
 
 ## IDF Pre-Processing Helper
