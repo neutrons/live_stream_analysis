@@ -30,6 +30,11 @@ from .live_plot import HistogramPlotter, create_live_histogram_plotter, maybe_up
 
 LOGGER = logging.getLogger(__name__)
 
+# Socket failures that mean "the live stream went away" rather than "the analysis is broken".
+# ConnectionError covers reset/aborted/refused/broken-pipe. These must route into the reconnect
+# path; letting them reach the top-level OSError handler kills the analyzer on a network blip.
+STREAM_DROP_ERRORS = (ConnectionError, TimeoutError)
+
 
 def _should_keep_live_plot_open(args: argparse.Namespace) -> bool:
     return bool(getattr(args, "live_plot_mode", None) == "browser" and getattr(args, "live_plot_keep_open", False))
@@ -233,20 +238,37 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
 
         reconnect_attempts = 0
         while True:
-            accumulation_result = runner.accumulate_histogram(
-                reader,
-                args,
-                q_conversion,
-                histogram_bins,
-                plotter,
-                chunk_size=chunk_size,
-                q_conversion_provider=lambda: runtime_state.pixel_q_conversion,
-                histogram_callback=_publish_histogram_snapshot,
-                run_complete_callback=_handle_run_complete,
-                histogram_state_callback=_set_active_hist,
-                hist=active_hist,
-            )
-            if len(accumulation_result) == 5:
+            try:
+                accumulation_result = runner.accumulate_histogram(
+                    reader,
+                    args,
+                    q_conversion,
+                    histogram_bins,
+                    plotter,
+                    chunk_size=chunk_size,
+                    q_conversion_provider=lambda: runtime_state.pixel_q_conversion,
+                    histogram_callback=_publish_histogram_snapshot,
+                    run_complete_callback=_handle_run_complete,
+                    histogram_state_callback=_set_active_hist,
+                    hist=active_hist,
+                )
+            except STREAM_DROP_ERRORS as exc:
+                if args.adara_stream is None:
+                    raise
+                # A reset or timeout part-way through a read means the stream went away, not
+                # that the analysis failed. Fall through to the reconnect path below with
+                # whatever this attempt accumulated -- active_hist is mutated in place, so the
+                # counts collected before the drop survive.
+                LOGGER.warning("ADARA live stream dropped mid-read (%s); treating as a disconnect", exc)
+                accumulation_result = None
+
+            if accumulation_result is None:
+                packet_count = 0
+                total_events = 0
+                histogram_events = 0
+                hist = active_hist if active_hist is not None else [0] * histogram_bins
+                adara_stats = None
+            elif len(accumulation_result) == 5:
                 packet_count, total_events, histogram_events, hist, adara_stats = accumulation_result
             elif len(accumulation_result) == 4:
                 packet_count, total_events, histogram_events, hist = accumulation_result
@@ -279,8 +301,8 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 run_completion_handled = False
                 continue
 
-            reconnect_attempts += 1
             max_reconnects = args.adara_stream_max_reconnects
+            reconnect_attempts += 1
             if max_reconnects >= 0 and reconnect_attempts > max_reconnects:
                 raise OSError(
                     "ADARA live stream ended before END_RUN and reconnect limit was reached"
@@ -303,13 +325,26 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 args.adara_stream[1],
             )
             time.sleep(reconnect_delay)
-            LOGGER.info(
-                "Reconnecting to ADARA live stream %s:%s (attempt %s)",
-                args.adara_stream[0],
-                args.adara_stream[1],
-                reconnect_attempts,
-            )
-            reader = build_reader(args)
+            # Keep retrying the connection itself. If the SMS is restarting, the first few
+            # attempts get refused, and giving up there would defeat the point of reconnecting.
+            while True:
+                LOGGER.info(
+                    "Reconnecting to ADARA live stream %s:%s (attempt %s)",
+                    args.adara_stream[0],
+                    args.adara_stream[1],
+                    reconnect_attempts,
+                )
+                try:
+                    reader = build_reader(args)
+                    break
+                except STREAM_DROP_ERRORS as exc:
+                    LOGGER.warning("Reconnect attempt %s failed: %s", reconnect_attempts, exc)
+                    reconnect_attempts += 1
+                    if max_reconnects >= 0 and reconnect_attempts > max_reconnects:
+                        raise OSError(
+                            "ADARA live stream ended before END_RUN and reconnect limit was reached"
+                        ) from exc
+                    time.sleep(reconnect_delay)
 
         active_hist = hist
         LOGGER.info(
