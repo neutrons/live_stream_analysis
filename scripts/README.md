@@ -3,7 +3,12 @@
 This directory contains helper and verification scripts used during development.
 
 The core package in `src/live_stream_analysis` is pure Python and does not require Mantid.
-Some scripts under `scripts/preparer` are optional verification utilities that depend on Mantid.
+Some scripts under `scripts/preparer` and `scripts/live_comparison` are optional verification
+utilities that depend on Mantid.
+
+- `scripts/preparer` builds pixel geometry and I(Q) from an IDF with Mantid.
+- `scripts/live_comparison` checks the analyzer's I(Q) against the equivalent Mantid
+  reduction, and documents how our pipeline maps onto Mantid's `StartLiveData` stack.
 
 ## Mantid setup for optional verification scripts
 
