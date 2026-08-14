@@ -11,7 +11,13 @@ from pathlib import Path
 
 from . import nexus
 from .factory import build_reader, create_source_runner
-from .histogram import apply_corrections, load_pixel_q_conversion, validate_histogram_args, write_histogram_csv
+from .histogram import (
+    apply_corrections,
+    bin_centre_q_values,
+    load_pixel_q_conversion,
+    validate_histogram_args,
+    write_histogram_csv,
+)
 from ..intersect import (
     build_histogram_payload,
     build_run_complete_payload,
@@ -24,9 +30,35 @@ from .live_plot import HistogramPlotter, create_live_histogram_plotter, maybe_up
 
 LOGGER = logging.getLogger(__name__)
 
+# Socket failures that mean "the live stream went away" rather than "the analysis is broken".
+# ConnectionError covers reset/aborted/refused/broken-pipe. These must route into the reconnect
+# path; letting them reach the top-level OSError handler kills the analyzer on a network blip.
+STREAM_DROP_ERRORS = (ConnectionError, TimeoutError)
+
 
 def _should_keep_live_plot_open(args: argparse.Namespace) -> bool:
     return bool(getattr(args, "live_plot_mode", None) == "browser" and getattr(args, "live_plot_keep_open", False))
+
+
+def _write_histogram_output(
+    corrected_hist: list[float],
+    corrected_error: list[float],
+    args: argparse.Namespace,
+) -> bool:
+    """Write the histogram CSV, returning False if it could not be written."""
+    try:
+        LOGGER.info("Writing histogram CSV to %s", Path(args.histogram_output_csv).resolve())
+        write_histogram_csv(
+            corrected_hist,
+            corrected_error,
+            args.histogram_output_csv,
+            args.histogram_q_bin_size,
+            args.histogram_q_min,
+        )
+    except OSError as exc:
+        print(f"Error writing histogram output: {exc}", file=sys.stderr)
+        return False
+    return True
 
 
 def _configure_logging(args: argparse.Namespace) -> None:
@@ -45,6 +77,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
     active_hist: list[int] | None = None
     next_snapshot_event_count = max(1, args.histogram_snapshot_every) if args.histogram_snapshot_every > 0 else None
     adara_stats = None
+    histogram_csv_written = False
     packet_count = 0
     total_events = 0
     histogram_events = 0
@@ -110,7 +143,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 interval = max(1, intersect_config.publish_interval_seconds)
                 if last_intersect_publish_at is None or (now - last_intersect_publish_at) >= interval:
                     last_intersect_publish_at = now
-                    q_values = [args.histogram_q_min + (index * args.histogram_q_bin_size) for index in range(len(hist))]
+                    q_values = bin_centre_q_values(args.histogram_q_min, args.histogram_q_bin_size, len(hist))
                     errors = [math.sqrt(float(value)) for value in hist]
                     payload = build_histogram_payload(q_values, [float(value) for value in hist], errors)
                     LOGGER.info(
@@ -164,7 +197,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 float(sum(final_hist)),
             )
             if publisher is not None and intersect_config is not None:
-                q_values = [args.histogram_q_min + (index * args.histogram_q_bin_size) for index in range(len(final_hist))]
+                q_values = bin_centre_q_values(args.histogram_q_min, args.histogram_q_bin_size, len(final_hist))
                 publisher.publish_event(
                     intersect_config.histogram_event_name,
                     build_histogram_payload(q_values, final_hist, final_error),
@@ -205,20 +238,37 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
 
         reconnect_attempts = 0
         while True:
-            accumulation_result = runner.accumulate_histogram(
-                reader,
-                args,
-                q_conversion,
-                histogram_bins,
-                plotter,
-                chunk_size=chunk_size,
-                q_conversion_provider=lambda: runtime_state.pixel_q_conversion,
-                histogram_callback=_publish_histogram_snapshot,
-                run_complete_callback=_handle_run_complete,
-                histogram_state_callback=_set_active_hist,
-                hist=active_hist,
-            )
-            if len(accumulation_result) == 5:
+            try:
+                accumulation_result = runner.accumulate_histogram(
+                    reader,
+                    args,
+                    q_conversion,
+                    histogram_bins,
+                    plotter,
+                    chunk_size=chunk_size,
+                    q_conversion_provider=lambda: runtime_state.pixel_q_conversion,
+                    histogram_callback=_publish_histogram_snapshot,
+                    run_complete_callback=_handle_run_complete,
+                    histogram_state_callback=_set_active_hist,
+                    hist=active_hist,
+                )
+            except STREAM_DROP_ERRORS as exc:
+                if args.adara_stream is None:
+                    raise
+                # A reset or timeout part-way through a read means the stream went away, not
+                # that the analysis failed. Fall through to the reconnect path below with
+                # whatever this attempt accumulated -- active_hist is mutated in place, so the
+                # counts collected before the drop survive.
+                LOGGER.warning("ADARA live stream dropped mid-read (%s); treating as a disconnect", exc)
+                accumulation_result = None
+
+            if accumulation_result is None:
+                packet_count = 0
+                total_events = 0
+                histogram_events = 0
+                hist = active_hist if active_hist is not None else [0] * histogram_bins
+                adara_stats = None
+            elif len(accumulation_result) == 5:
                 packet_count, total_events, histogram_events, hist, adara_stats = accumulation_result
             elif len(accumulation_result) == 4:
                 packet_count, total_events, histogram_events, hist = accumulation_result
@@ -251,8 +301,8 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 run_completion_handled = False
                 continue
 
-            reconnect_attempts += 1
             max_reconnects = args.adara_stream_max_reconnects
+            reconnect_attempts += 1
             if max_reconnects >= 0 and reconnect_attempts > max_reconnects:
                 raise OSError(
                     "ADARA live stream ended before END_RUN and reconnect limit was reached"
@@ -275,13 +325,26 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 args.adara_stream[1],
             )
             time.sleep(reconnect_delay)
-            LOGGER.info(
-                "Reconnecting to ADARA live stream %s:%s (attempt %s)",
-                args.adara_stream[0],
-                args.adara_stream[1],
-                reconnect_attempts,
-            )
-            reader = build_reader(args)
+            # Keep retrying the connection itself. If the SMS is restarting, the first few
+            # attempts get refused, and giving up there would defeat the point of reconnecting.
+            while True:
+                LOGGER.info(
+                    "Reconnecting to ADARA live stream %s:%s (attempt %s)",
+                    args.adara_stream[0],
+                    args.adara_stream[1],
+                    reconnect_attempts,
+                )
+                try:
+                    reader = build_reader(args)
+                    break
+                except STREAM_DROP_ERRORS as exc:
+                    LOGGER.warning("Reconnect attempt %s failed: %s", reconnect_attempts, exc)
+                    reconnect_attempts += 1
+                    if max_reconnects >= 0 and reconnect_attempts > max_reconnects:
+                        raise OSError(
+                            "ADARA live stream ended before END_RUN and reconnect limit was reached"
+                        ) from exc
+                    time.sleep(reconnect_delay)
 
         active_hist = hist
         LOGGER.info(
@@ -299,6 +362,13 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             corrected_hist = [0.0] * histogram_bins
             corrected_error = [0.0] * histogram_bins
         LOGGER.info("Final histogram update complete")
+        # Write the CSV before blocking on the live plot. --live-plot-keep-open parks the
+        # process until it is interrupted, so deferring the write would leave the caller
+        # with no output file for as long as the plot stays up.
+        if args.histogram_output_csv is not None:
+            if not _write_histogram_output(corrected_hist, corrected_error, args):
+                return 1
+            histogram_csv_written = True
         if plotter is not None and _should_keep_live_plot_open(args):
             LOGGER.info("Keeping browser live plot available at %s until interrupted", getattr(plotter, "url", "configured host/port"))
             plotter.wait_until_closed()
@@ -314,18 +384,8 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
         if publisher is not None:
             publisher.close()
 
-    if args.histogram_output_csv is not None:
-        try:
-            LOGGER.info("Writing histogram CSV to %s", Path(args.histogram_output_csv).resolve())
-            write_histogram_csv(
-                corrected_hist,
-                corrected_error,
-                args.histogram_output_csv,
-                args.histogram_q_bin_size,
-                args.histogram_q_min,
-            )
-        except OSError as exc:
-            print(f"Error writing histogram output: {exc}", file=sys.stderr)
+    if args.histogram_output_csv is not None and not histogram_csv_written:
+        if not _write_histogram_output(corrected_hist, corrected_error, args):
             return 1
 
     print(f"Packets read         : {packet_count}")

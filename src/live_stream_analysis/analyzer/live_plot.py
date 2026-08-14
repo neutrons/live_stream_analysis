@@ -14,6 +14,9 @@ from urllib.parse import urlparse
 
 import matplotlib
 import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection
+
+from .histogram import bin_centre_q_values
 
 
 logger = logging.getLogger(__name__)
@@ -132,7 +135,7 @@ class BrowserHistogramPlotter:
         port: int,
         open_browser: bool,
     ):
-        q_values = [q_min + (index * q_bin_size) for index in range(histogram_bins)]
+        q_values = bin_centre_q_values(q_min, q_bin_size, histogram_bins)
         self._state = _BrowserPlotState(q_values)
         self._server = _BrowserPlotServer((host, port), self._state, _browser_plot_html())
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
@@ -159,10 +162,17 @@ class LiveHistogramPlotter:
     def __init__(self, q_min: float, q_bin_size: float, histogram_bins: int):
         plt.ion()
         self._figure, (self._axis, self._relative_axis) = plt.subplots(2, 1, figsize=(12, 9), sharex=True)
-        self._q_values = [q_min + (index * q_bin_size) for index in range(histogram_bins)]
+        self._q_values = bin_centre_q_values(q_min, q_bin_size, histogram_bins)
         zeros = [0.0] * histogram_bins
         (self._line,) = self._axis.plot(self._q_values, zeros, color="tab:blue", linewidth=1.5, label="I(Q)")
+        # Shaded envelope for the whole curve, plus per-bin bars that resolve when zoomed in.
         self._band = self._axis.fill_between(self._q_values, zeros, zeros, color="tab:blue", alpha=0.2)
+        # A LineCollection of per-bin vertical segments. Rebuilding 2000 matplotlib errorbar
+        # artists on every refresh is far too slow for a live plot; set_segments is not.
+        self._error_bars = LineCollection(
+            [], colors="tab:blue", linewidths=0.8, alpha=0.55, label="I(Q) $\\pm\\ \\sigma$"
+        )
+        self._axis.add_collection(self._error_bars)
         (self._relative_line,) = self._relative_axis.plot(
             self._q_values,
             zeros,
@@ -186,12 +196,22 @@ class LiveHistogramPlotter:
         plt.show(block=False)
 
     def update(self, intensity: list[float], error: list[float], relative_uncertainty: list[float]) -> None:
+        self._line.set_ydata(intensity)
         lower = [y_value - err_value for y_value, err_value in zip(intensity, error, strict=True)]
         upper = [y_value + err_value for y_value, err_value in zip(intensity, error, strict=True)]
-        self._line.set_ydata(intensity)
         self._band.remove()
         self._band = self._axis.fill_between(self._q_values, lower, upper, color="tab:blue", alpha=0.2)
+        segments = [
+            [(q_value, y_value - err_value), (q_value, y_value + err_value)]
+            for q_value, y_value, err_value in zip(self._q_values, intensity, error, strict=True)
+            if err_value > 0.0
+        ]
+        self._error_bars.set_segments(segments)
         self._axis.relim()
+        if segments:
+            # relim() only walks lines and patches, so the collection's extent has to be
+            # folded in explicitly or tall error bars get clipped by the autoscale.
+            self._axis.update_datalim([point for segment in segments for point in segment])
         self._axis.autoscale_view()
         self._relative_line.set_ydata(relative_uncertainty)
         self._relative_axis.relim()
@@ -647,7 +667,7 @@ def _browser_plot_html() -> str:
                     <div class=\"panel-header\">
                         <span class=\"panel-kicker\">MTS Reduction</span>
                         <h3 class=\"panel-title\">Live I(Q)</h3>
-                        <p class=\"panel-copy\">Primary histogram intensity across Q bins.</p>
+                        <p class=\"panel-copy\">Intensity per Q bin, with I(Q) &plusmn; &sigma; error bars.</p>
                     </div>
                     <div class=\"panel-body\">
                         <div class=\"chart-shell\">
@@ -658,6 +678,7 @@ def _browser_plot_html() -> str:
                                     <button class=\"chart-reset\" type=\"button\" id=\"zoom-out-intensity\">Zoom out</button>
                                     <button class=\"chart-reset\" type=\"button\" id=\"pan-left-intensity\">Pan left</button>
                                     <button class=\"chart-reset\" type=\"button\" id=\"pan-right-intensity\">Pan right</button>
+                                    <button class=\"chart-reset\" type=\"button\" id=\"scale-toggle\">Log</button>
                                     <button class=\"chart-reset\" type=\"button\" id=\"reset-intensity\">Reset view</button>
                                 </div>
                             </div>
@@ -750,13 +771,111 @@ def _browser_plot_html() -> str:
             return Math.trunc(Number(value));
         }
 
+        // Linear by default so the browser and desktop views agree out of the box.
+        let intensityScaleType = 'linear';
+        let latestPayload = null;
+
         function toSeries(xValues, yValues) {
             return xValues.map((xValue, index) => ({ x: xValue, y: yValues[index] ?? 0 }));
         }
 
-        function toLogSafeSeries(xValues, yValues) {
-            return xValues.map((xValue, index) => ({ x: xValue, y: Math.max(yValues[index] ?? 0, 1e-6) }));
+        // A log axis cannot render zero or negative bins. Emit null so Chart.js leaves a gap
+        // rather than drawing them along an artificial floor, which reads as real signal.
+        function toScaleSafeSeries(xValues, yValues) {
+            if (intensityScaleType !== 'logarithmic') {
+                return toSeries(xValues, yValues);
+            }
+            return xValues.map((xValue, index) => {
+                const value = yValues[index] ?? 0;
+                return { x: xValue, y: value > 0 ? value : null };
+            });
         }
+
+        // The band's lower edge is a drawing artefact, not a series worth naming in the legend.
+        function hideBandEdge(item) {
+            return item.text !== 'sigma-lower';
+        }
+
+        // One edge of the shaded I(Q) +/- sigma envelope; sign is +1 for upper, -1 for lower.
+        function toBandSeries(xValues, intensity, error, sign) {
+            return xValues.map((xValue, index) => {
+                const value = (intensity[index] ?? 0) + sign * (error[index] ?? 0);
+                if (intensityScaleType === 'logarithmic') {
+                    return { x: xValue, y: value > 0 ? value : null };
+                }
+                return { x: xValue, y: value };
+            });
+        }
+
+        // Per-bin [low, high] extents for the error bars. A log axis cannot draw a bar whose
+        // top is non-positive, so those are dropped; a bar straddling zero is clipped to its
+        // positive part rather than discarded.
+        let errorBarSeries = [];
+
+        function buildErrorBars(xValues, intensity, error) {
+            const bars = [];
+            for (let index = 0; index < xValues.length; index += 1) {
+                const centre = intensity[index] ?? 0;
+                const sigma = error[index] ?? 0;
+                if (!(sigma > 0)) {
+                    continue;
+                }
+                let low = centre - sigma;
+                const high = centre + sigma;
+                if (intensityScaleType === 'logarithmic') {
+                    if (!(high > 0)) {
+                        continue;
+                    }
+                    if (!(low > 0)) {
+                        low = high / 1000;
+                    }
+                }
+                bars.push({ x: xValues[index], low, high });
+            }
+            return bars;
+        }
+
+        // Chart.js has no native error bars, so draw them onto the canvas after the line.
+        const errorBarPlugin = {
+            id: 'errorBars',
+            afterDatasetsDraw(chart) {
+                if (!errorBarSeries.length) {
+                    return;
+                }
+                const xScale = chart.scales.x;
+                const yScale = chart.scales.y;
+                const ctx = chart.ctx;
+                // Only cap the bars once they are far enough apart to be distinguishable.
+                const visible = errorBarSeries.filter((bar) => bar.x >= xScale.min && bar.x <= xScale.max);
+                if (!visible.length) {
+                    return;
+                }
+                const spacing = (xScale.right - xScale.left) / visible.length;
+                const capHalfWidth = spacing >= 6 ? 2.5 : 0;
+                ctx.save();
+                ctx.strokeStyle = 'rgba(31, 119, 180, 0.55)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                for (const bar of visible) {
+                    const px = xScale.getPixelForValue(bar.x);
+                    const pLow = yScale.getPixelForValue(bar.low);
+                    const pHigh = yScale.getPixelForValue(bar.high);
+                    if (!Number.isFinite(px) || !Number.isFinite(pLow) || !Number.isFinite(pHigh)) {
+                        continue;
+                    }
+                    ctx.moveTo(px, pLow);
+                    ctx.lineTo(px, pHigh);
+                    if (capHalfWidth > 0) {
+                        ctx.moveTo(px - capHalfWidth, pLow);
+                        ctx.lineTo(px + capHalfWidth, pLow);
+                        ctx.moveTo(px - capHalfWidth, pHigh);
+                        ctx.lineTo(px + capHalfWidth, pHigh);
+                    }
+                }
+                ctx.stroke();
+                ctx.restore();
+            },
+        };
 
         function computeLogYAxisBounds(series) {
             const yValues = series.map((point) => point.y).filter((value) => Number.isFinite(value) && value > 0);
@@ -855,23 +974,47 @@ def _browser_plot_html() -> str:
         const intensityChart = new Chart(document.getElementById('intensity'), {
             type: 'line',
             data: {
-                datasets: [{
-                    label: 'I(Q)',
-                    data: [],
-                    borderColor: primaryLine,
-                    backgroundColor: 'rgba(31, 119, 180, 0.12)',
-                    pointRadius: 0,
-                    borderWidth: 1.8,
-                    tension: 0.08,
-                    fill: false,
-                }],
+                // Order matters: the band edges are declared first so the I(Q) line draws on top.
+                datasets: [
+                    {
+                        label: 'sigma-lower',
+                        data: [],
+                        borderColor: 'rgba(31, 119, 180, 0)',
+                        backgroundColor: 'rgba(31, 119, 180, 0.18)',
+                        pointRadius: 0,
+                        borderWidth: 0,
+                        tension: 0.08,
+                        fill: false,
+                    },
+                    {
+                        label: 'I(Q) +/- sigma',
+                        data: [],
+                        borderColor: 'rgba(31, 119, 180, 0)',
+                        backgroundColor: 'rgba(31, 119, 180, 0.18)',
+                        pointRadius: 0,
+                        borderWidth: 0,
+                        tension: 0.08,
+                        fill: '-1',
+                    },
+                    {
+                        label: 'I(Q)',
+                        data: [],
+                        borderColor: primaryLine,
+                        backgroundColor: 'rgba(31, 119, 180, 0.12)',
+                        pointRadius: 0,
+                        borderWidth: 1.8,
+                        tension: 0.08,
+                        fill: false,
+                    },
+                ],
             },
+            plugins: [errorBarPlugin],
             options: {
                 animation: false,
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    legend: { labels: { color: '#29435c', boxWidth: 14 } },
+                    legend: { labels: { color: '#29435c', boxWidth: 14, filter: hideBandEdge } },
                     zoom: zoomPluginOptions(),
                 },
                 scales: {
@@ -882,7 +1025,7 @@ def _browser_plot_html() -> str:
                         grid: { color: 'rgba(120, 144, 168, 0.18)' },
                     },
                     y: {
-                        type: 'logarithmic',
+                        type: intensityScaleType,
                         title: { display: true, text: 'I(Q)', color: '#29435c', font: { weight: '700' } },
                         ticks: { color: '#4f6478' },
                         grid: { color: 'rgba(120, 144, 168, 0.18)' },
@@ -978,6 +1121,37 @@ def _browser_plot_html() -> str:
             return `${first.toFixed(2)} to ${last.toFixed(2)}`;
         }
 
+        function renderIntensity(payload) {
+            const lineSeries = toScaleSafeSeries(payload.q_values, payload.intensity);
+            const lowerSeries = toBandSeries(payload.q_values, payload.intensity, payload.error, -1);
+            const upperSeries = toBandSeries(payload.q_values, payload.intensity, payload.error, 1);
+            errorBarSeries = buildErrorBars(payload.q_values, payload.intensity, payload.error);
+            initializeXAxisBounds(intensityChart, payload.q_values);
+            intensityChart.data.datasets[0].data = lowerSeries;
+            intensityChart.data.datasets[1].data = upperSeries;
+            intensityChart.data.datasets[2].data = lineSeries;
+            intensityChart.options.scales.y.type = intensityScaleType;
+            if (intensityScaleType === 'logarithmic') {
+                // Include the band top so the tallest error bar is not clipped by the axis.
+                const bounds = computeLogYAxisBounds(lineSeries.concat(upperSeries));
+                intensityChart.options.scales.y.min = bounds.min;
+                intensityChart.options.scales.y.max = bounds.max;
+            } else {
+                intensityChart.options.scales.y.min = undefined;
+                intensityChart.options.scales.y.max = undefined;
+            }
+            intensityChart.update('none');
+        }
+
+        document.getElementById('scale-toggle').addEventListener('click', () => {
+            intensityScaleType = intensityScaleType === 'logarithmic' ? 'linear' : 'logarithmic';
+            document.getElementById('scale-toggle').textContent =
+                intensityScaleType === 'logarithmic' ? 'Linear' : 'Log';
+            if (latestPayload) {
+                renderIntensity(latestPayload);
+            }
+        });
+
         async function refresh() {
             if (interactionDepth > 0) {
                 return;
@@ -985,14 +1159,9 @@ def _browser_plot_html() -> str:
             const response = await fetch('/state', { cache: 'no-store' });
             const payload = await response.json();
             const status = payload.status;
-            const intensitySeries = toLogSafeSeries(payload.q_values, payload.intensity);
+            latestPayload = payload;
             const relativeSeries = toSeries(payload.q_values, payload.relative_uncertainty);
-            const intensityBounds = computeLogYAxisBounds(intensitySeries);
-            initializeXAxisBounds(intensityChart, payload.q_values);
-            intensityChart.data.datasets[0].data = intensitySeries;
-            intensityChart.options.scales.y.min = intensityBounds.min;
-            intensityChart.options.scales.y.max = intensityBounds.max;
-            intensityChart.update('none');
+            renderIntensity(payload);
             initializeXAxisBounds(relativeChart, payload.q_values);
             relativeChart.data.datasets[0].data = relativeSeries;
             relativeChart.update('none');

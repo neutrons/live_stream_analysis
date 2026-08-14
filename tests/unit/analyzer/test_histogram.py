@@ -9,11 +9,14 @@ import pytest
 from live_stream_analysis.analyzer.histogram import (
     PixelQConversion,
     apply_corrections,
+    bin_centre_q_values,
     load_pixel_q_conversion,
     load_q_matrix_constants,
     pixel_tof_to_q,
     validate_histogram_args,
+    write_histogram_csv,
 )
+from live_stream_analysis.analyzer.live_plot import LiveHistogramPlotter, _BrowserPlotState
 
 
 def test_load_q_matrix_constants_maps_pixel_ids(tmp_path: Path):
@@ -141,3 +144,30 @@ def test_apply_corrections_can_convert_to_mantid_style_sq():
 
     assert corrected == [pytest.approx(8.5)]
     assert error == [pytest.approx(3.0)]
+
+
+def test_bin_centre_q_values_reports_the_middle_of_each_bin():
+    assert bin_centre_q_values(0.0, 0.02, 3) == [pytest.approx(0.01), pytest.approx(0.03), pytest.approx(0.05)]
+    assert bin_centre_q_values(1.0, 0.5, 2) == [pytest.approx(1.25), pytest.approx(1.75)]
+
+
+def test_csv_live_plots_and_intersect_all_label_bins_identically(tmp_path: Path):
+    """Every histogram consumer must place a given bin at the same Q.
+
+    The live plots once used bin left edges while the CSV used centres, so the same peak
+    reported two different Q values depending on where you looked.
+    """
+    q_min, q_bin_size, bins = 0.0, 0.02, 5
+    expected = bin_centre_q_values(q_min, q_bin_size, bins)
+
+    output = tmp_path / "histogram.csv"
+    write_histogram_csv([0.0] * bins, [0.0] * bins, str(output), q_bin_size, q_min)
+    csv_q = [float(line.split(",")[0]) for line in output.read_text().splitlines()[1:]]
+    assert csv_q == [pytest.approx(value) for value in expected]
+
+    desktop = LiveHistogramPlotter.__new__(LiveHistogramPlotter)
+    desktop._q_values = bin_centre_q_values(q_min, q_bin_size, bins)
+    assert desktop._q_values == [pytest.approx(value) for value in expected]
+
+    browser_state = _BrowserPlotState(bin_centre_q_values(q_min, q_bin_size, bins))
+    assert browser_state.snapshot()["q_values"] == [pytest.approx(value) for value in expected]
