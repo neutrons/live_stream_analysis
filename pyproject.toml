@@ -96,6 +96,11 @@ ignore = []
 # The browser page's HTML, CSS, and JS live in one embedded string, where noqa comments cannot go.
 "src/live_stream_analysis/analyzer/live_plot.py" = ["E501"]
 
+# C90 (mccabe) fails any function whose cyclomatic complexity exceeds this.
+# Existing `# noqa: C901` suppressions are reported, not enforced, by the CI complexity step.
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
 [tool.ruff.lint.isort]
 known-first-party = ["live_stream_analysis"]
 

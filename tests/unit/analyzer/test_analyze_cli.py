@@ -1162,6 +1162,73 @@ class TestAdaraFileCLI:
         assert max(histogram_events[0].intensity) == 2.0
         assert max(histogram_events[-1].intensity) == 1.0
 
+    def test_histogram_mode_end_run_writes_finalized_run_to_output_csv(self, tmp_path: Path, monkeypatch):
+        """A run file ending in END_RUN must not write the reset histogram over the finished run."""
+        path = _write_adara(tmp_path, null_packet())
+        pixel_csv = tmp_path / "pixel_geometry.csv"
+        pixel_csv.write_text(
+            "pixel id,L2 value,theta value,TOF-to-Q matrix element\n0,1.0,1.0,0.0\n1,1.0,1.0,99.0\n",
+            encoding="utf-8",
+        )
+        output = tmp_path / "histogram.csv"
+
+        class _EndRunRunner:
+            def accumulate_histogram(
+                self,
+                reader,
+                args,
+                q_conversion,
+                histogram_bins,
+                plotter,
+                *,
+                chunk_size,
+                q_conversion_provider=None,
+                histogram_callback=None,
+                run_complete_callback=None,
+                histogram_state_callback=None,
+                hist=None,
+                run_statistics=None,
+                display_transform=None,
+            ):
+                _ = (reader, args, q_conversion, plotter, chunk_size, q_conversion_provider, histogram_callback)
+                _ = (hist, run_statistics, display_transform)
+                # Mirrors accumulate_adara_histogram: END_RUN finalizes, which resets the histogram
+                # in place, and the reset histogram is what gets returned.
+                hist = [0] * histogram_bins
+                histogram_state_callback(hist)
+                hist[4950] = 7
+                run_complete_callback(object())
+                return 1, 7, 7, hist, None
+
+            def run_basic_mode(self, reader, *, chunk_size: int) -> int:
+                _ = (reader, chunk_size)
+                return 0
+
+        monkeypatch.setattr(
+            "live_stream_analysis.analyzer.histogram_runner.create_source_runner",
+            lambda _args: _EndRunRunner(),
+        )
+
+        rc = main(
+            [
+                "analyze",
+                "--adara-file",
+                str(path),
+                "--histogram-pixel-geometry-csv",
+                str(pixel_csv),
+                "--histogram-q-max",
+                "100",
+                "--histogram-q-bin-size",
+                "0.02",
+                "--histogram-output-csv",
+                str(output),
+            ]
+        )
+
+        assert rc == 0
+        rows = list(csv.DictReader(output.read_text(encoding="utf-8").splitlines()))
+        assert sum(float(row["I(Q)"]) for row in rows) == 7.0
+
     def test_histogram_mode_live_plot_refresh_every_throttles_intermediate_updates(self, tmp_path: Path, monkeypatch):
         path = _write_adara(tmp_path, event_packet([(1, 1)]), event_packet([(1, 1)]), event_packet([(1, 1)]))
         pixel_csv = tmp_path / "pixel_geometry.csv"
