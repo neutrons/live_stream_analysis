@@ -128,6 +128,7 @@ class _HistogramSession:
     intersect_config: IntersectConfig | None
     active_hist: list[int] | None = field(default=None, init=False)
     run_completion_handled: bool = field(default=False, init=False)
+    _last_finalized: tuple[list[float], list[float]] | None = field(default=None, init=False)
     _last_intersect_publish_at: float | None = field(default=None, init=False)
     _next_snapshot_event_count: int | None = field(init=False)
 
@@ -276,6 +277,7 @@ class _HistogramSession:
             float(sum(final_hist)),
         )
         self._publish_run_complete(final_hist, final_error)
+        self._last_finalized = (final_hist, final_error)
         return final_hist, final_error
 
     def _publish_run_complete(self, final_hist: list[float], final_error: list[float]) -> None:
@@ -326,6 +328,10 @@ class _HistogramSession:
         # run that started after the last boundary and still needs finalizing.
         if any(hist):
             return self.finalize_run(hist)
+        # Nothing new since the last END_RUN. Its histogram has been reset, so report the run
+        # it finalized rather than the empty one -- a run file ending in END_RUN lands here.
+        if self._last_finalized is not None:
+            return self._last_finalized
         return [0.0] * self.histogram_bins, [0.0] * self.histogram_bins
 
 
