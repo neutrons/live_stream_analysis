@@ -268,6 +268,10 @@ def run_from_namespace(args: argparse.Namespace) -> int:
         print(f"Reduction mode: {args.mode}")
         print(f"Input NeXus files: {len(args.nexus_file)}")
         print(f"Total counts: {result.total_counts}")
+        print(
+            f"Total proton charge (pC): {result.proton_charge_pc if result.proton_charge_pc is not None else 'unknown'}"
+        )
+        print(f"Total duration (s): {result.duration_s if result.duration_s is not None else 'unknown'}")
         print(f"Reduction CSV: {args.reduction_output_csv.resolve()}")
         return 0
 

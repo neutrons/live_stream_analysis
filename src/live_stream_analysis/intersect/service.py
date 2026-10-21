@@ -14,6 +14,7 @@ from intersect_sdk import (
     intersect_status,
 )
 
+from ..correction_totals import CorrectionTotals, correction_totals_from_rows
 from ..statistics import RunStatistics
 from .config import build_service_config
 from .data_models import (
@@ -49,8 +50,10 @@ class HistogramRuntimeState:
     pixel_q_conversion: Any | None = None
     background_values: list[float] | None = None
     background_errors: list[float] | None = None
+    background_totals: CorrectionTotals | None = None
     normalization_values: list[float] | None = None
     normalization_errors: list[float] | None = None
+    normalization_totals: CorrectionTotals | None = None
     correction_bins: int | None = None
     adara_file_read_released: bool = True
     adara_file_read_event: threading.Event = field(default_factory=threading.Event)
@@ -83,18 +86,16 @@ class HistogramRuntimeState:
             raise ValueError(f"{kind} correction CSV has {len(values)} bins but expected {self.correction_bins}")
 
 
-def _load_correction_from_csv_text(csv_text: str) -> tuple[list[float], list[float]]:
+def _load_correction_from_csv_text(csv_text: str) -> tuple[list[float], list[float], CorrectionTotals]:
     reader = csv.DictReader(io.StringIO(csv_text))
     required_columns = {"Q value", "I(Q)", "Error I(Q)"}
     if reader.fieldnames is None or not required_columns.issubset(set(reader.fieldnames)):
         raise ValueError("Correction CSV must include columns: 'Q value', 'I(Q)', 'Error I(Q)'")
 
-    values: list[float] = []
-    errors: list[float] = []
-    for row in reader:
-        values.append(float(row["I(Q)"]))
-        errors.append(float(row["Error I(Q)"]))
-    return values, errors
+    rows = list(reader)
+    values = [float(row["I(Q)"]) for row in rows]
+    errors = [float(row["Error I(Q)"]) for row in rows]
+    return values, errors, correction_totals_from_rows(rows)
 
 
 def _load_pixel_q_conversion_from_csv_text(csv_text: str) -> Any:
@@ -150,18 +151,20 @@ class LiveStreamAnalysisCapability(IntersectBaseCapabilityImplementation):
 
     @intersect_message()
     def set_background(self, payload: CsvTextRequest) -> UpdateResponse:
-        values, errors = _load_correction_from_csv_text(payload.csv_text)
+        values, errors, totals = _load_correction_from_csv_text(payload.csv_text)
         self.runtime_state.validate_correction_length(values, "Background")
         self.runtime_state.background_values = values
         self.runtime_state.background_errors = errors
+        self.runtime_state.background_totals = totals
         return UpdateResponse(status="updated", kind="background")
 
     @intersect_message()
     def set_normalization(self, payload: CsvTextRequest) -> UpdateResponse:
-        values, errors = _load_correction_from_csv_text(payload.csv_text)
+        values, errors, totals = _load_correction_from_csv_text(payload.csv_text)
         self.runtime_state.validate_correction_length(values, "Normalization")
         self.runtime_state.normalization_values = values
         self.runtime_state.normalization_errors = errors
+        self.runtime_state.normalization_totals = totals
         return UpdateResponse(status="updated", kind="normalization")
 
     @intersect_message()

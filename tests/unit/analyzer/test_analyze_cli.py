@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import logging
 from pathlib import Path
 
 import h5py
@@ -10,9 +11,12 @@ import numpy as np
 import pytest
 from readadara import AdaraFileReader
 
+from live_stream_analysis.analyzer import histogram as histogram_module
 from live_stream_analysis.analyzer.factory import build_reader as _build_reader
 from live_stream_analysis.analyzer.histogram import load_correction_csv
+from live_stream_analysis.analyzer.histogram_runner import _warn_if_correction_lacks_totals
 from live_stream_analysis.analyzer.live_plot import compute_relative_uncertainty
+from live_stream_analysis.correction_totals import DURATION_COLUMN, PROTON_CHARGE_COLUMN
 from live_stream_analysis.main import build_parser, main
 from live_stream_analysis.statistics import STATISTICS_CSV_COLUMNS
 from tests.unit.analyzer.adara_fixtures import event_packet, null_packet, rtdl_packet
@@ -920,7 +924,9 @@ class TestAdaraFileCLI:
                 histogram_state_callback=None,
                 hist=None,
                 run_statistics=None,
+                display_transform=None,
             ):
+                _ = display_transform
                 _ = (reader, args, q_conversion, plotter, chunk_size, q_conversion_provider, run_complete_callback)
                 hist = [0] * histogram_bins
                 histogram_state_callback(hist)
@@ -1097,7 +1103,9 @@ class TestAdaraFileCLI:
                 histogram_state_callback=None,
                 hist=None,
                 run_statistics=None,
+                display_transform=None,
             ):
+                _ = display_transform
                 _ = (
                     reader,
                     args,
@@ -1577,3 +1585,273 @@ class TestPreparedPixelGeometryCalibrationIntegration:
         out = capsys.readouterr().out
         assert "Histogrammed events" in out
         assert "0" in out
+
+
+class TestCorrectionExposureNormalization:
+    """Issue #37 end to end: preparer stamps each correction with its exposure, analyzer divides by it.
+
+    The background comes from a real preparer run, so the test also pins the CSV contract
+    between the two commands rather than a hand-written approximation of it.
+    """
+
+    # Matches the minimal-IDF pixel the preparer derives, so both commands land events in the
+    # same Q bin: 4492.23 / 1000 us ~= 4.49.
+    Q_MATRIX_ELEMENT = 4492.234481835429
+    TOF_US = 1000
+    BACKGROUND_EVENTS = 2
+    BACKGROUND_CHARGE_PC = 2000.0
+    SAMPLE_EVENTS = 8
+    SAMPLE_CHARGE_PC = 4000.0
+
+    def _pixel_csv(self, tmp_path: Path) -> Path:
+        pixel_csv = tmp_path / "pixel_geometry.csv"
+        pixel_csv.write_text(
+            f"pixel id,L2 value,theta value,TOF-to-Q matrix element\n1,1.0,90.0,{self.Q_MATRIX_ELEMENT}\n",
+            encoding="utf-8",
+        )
+        return pixel_csv
+
+    def _nexus(self, tmp_path: Path, name: str, events: int, proton_charge: float) -> Path:
+        path = _write_nexus(tmp_path, name, [1] * events, [float(self.TOF_US)] * events, _minimal_preparer_idf())
+        with h5py.File(path, "a") as handle:
+            handle["entry"].create_dataset("proton_charge", data=np.array([proton_charge]))
+            handle["entry"].create_dataset("duration", data=np.array([10.0]))
+        return path
+
+    def _background_csv(self, tmp_path: Path) -> Path:
+        background_nexus = self._nexus(tmp_path, "background.nxs.h5", self.BACKGROUND_EVENTS, self.BACKGROUND_CHARGE_PC)
+        background_csv = tmp_path / "background.csv"
+        rc = main(
+            [
+                "preparer",
+                "--mode",
+                "background",
+                "--nexus-file",
+                str(background_nexus),
+                "--reduction-output-csv",
+                str(background_csv),
+                "--q-min",
+                "0.0",
+                "--q-max",
+                "30.0",
+            ]
+        )
+        assert rc == 0
+        return background_csv
+
+    def _analyze(self, tmp_path: Path, source: list[str], background_csv: Path) -> tuple[float, float]:
+        output = tmp_path / "histogram.csv"
+        rc = main(
+            [
+                "analyze",
+                *source,
+                "--histogram-pixel-geometry-csv",
+                str(self._pixel_csv(tmp_path)),
+                "--histogram-q-max",
+                "30",
+                "--background-subtraction",
+                str(background_csv),
+                "--histogram-output-csv",
+                str(output),
+            ]
+        )
+        assert rc == 0
+        rows = list(csv.DictReader(output.read_text(encoding="utf-8").splitlines()))
+        populated = [(float(r["I(Q)"]), float(r["Error I(Q)"])) for r in rows if float(r["I(Q)"]) != 0.0]
+        assert len(populated) == 1
+        return populated[0]
+
+    def _expected(self) -> tuple[float, float]:
+        intensity = self.SAMPLE_EVENTS / self.SAMPLE_CHARGE_PC - self.BACKGROUND_EVENTS / self.BACKGROUND_CHARGE_PC
+        variance = self.SAMPLE_EVENTS / self.SAMPLE_CHARGE_PC**2 + self.BACKGROUND_EVENTS / self.BACKGROUND_CHARGE_PC**2
+        return intensity, variance**0.5
+
+    def test_adara_replay_subtracts_background_per_unit_charge(self, tmp_path: Path):
+        background_csv = self._background_csv(tmp_path)
+        adara = _write_adara(
+            tmp_path,
+            rtdl_packet(timestamp_s=100, charge_10pc=int(self.SAMPLE_CHARGE_PC / 10)),
+            event_packet([(1, self.TOF_US)] * self.SAMPLE_EVENTS, timestamp_s=100),
+        )
+
+        intensity, error = self._analyze(tmp_path, ["--adara-file", str(adara)], background_csv)
+
+        expected_intensity, expected_error = self._expected()
+        assert intensity == pytest.approx(expected_intensity)
+        assert error == pytest.approx(expected_error)
+
+    def test_nexus_replay_subtracts_background_per_unit_charge(self, tmp_path: Path):
+        background_csv = self._background_csv(tmp_path)
+        sample = self._nexus(tmp_path, "sample.nxs.h5", self.SAMPLE_EVENTS, self.SAMPLE_CHARGE_PC)
+
+        intensity, error = self._analyze(tmp_path, ["--nexus-file", str(sample)], background_csv)
+
+        expected_intensity, expected_error = self._expected()
+        assert intensity == pytest.approx(expected_intensity)
+        assert error == pytest.approx(expected_error)
+
+    def test_startup_warns_when_a_correction_csv_has_no_exposure_totals(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ):
+        """A pre-#37 CSV silently falls back to the sample's scale, so the fallback must be visible."""
+        legacy_csv = tmp_path / "legacy_background.csv"
+        legacy_csv.write_text("Q value,I(Q),Error I(Q)\n0.01,1.0,1.0\n", encoding="utf-8")
+
+        with caplog.at_level(logging.WARNING):
+            _warn_if_correction_lacks_totals(str(legacy_csv), "Background", "proton-charge")
+            _warn_if_correction_lacks_totals(str(legacy_csv), "Background", "none")
+
+        warnings = [record for record in caplog.records if record.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        assert "legacy_background.csv" in warnings[0].getMessage()
+        assert "proton charge" in warnings[0].getMessage()
+
+    def test_startup_does_not_warn_for_a_preparer_csv(self, tmp_path: Path, caplog: pytest.LogCaptureFixture):
+        background_csv = self._background_csv(tmp_path)
+
+        with caplog.at_level(logging.WARNING):
+            _warn_if_correction_lacks_totals(str(background_csv), "Background", "proton-charge")
+            _warn_if_correction_lacks_totals(str(background_csv), "Background", "time")
+
+        assert not [record for record in caplog.records if record.levelno == logging.WARNING]
+
+
+class TestLivePlotShowsNormalizedHistogram:
+    """The live plot must show what the run will report, not raw counts that only grow.
+
+    Normalized by exposure, a steady source gives an I(Q) that holds roughly constant while
+    its error shrinks. Raw counts instead climb for the whole run and then jump to the
+    corrected curve when the run finalizes.
+    """
+
+    PIXEL_CSV = "pixel id,L2 value,theta value,TOF-to-Q matrix element\n0,1.0,1.0,0.0\n1,1.0,1.0,99.0\n"
+
+    def _record_plot_frames(self, monkeypatch: pytest.MonkeyPatch) -> list[float]:
+        peaks: list[float] = []
+
+        class _RecordingPlotter:
+            def update(self, intensity, _error, _relative_uncertainty, _statistics=None):
+                peaks.append(max(intensity, key=abs))
+
+            def close(self):
+                return None
+
+        monkeypatch.setattr(
+            "live_stream_analysis.analyzer.histogram_runner.create_live_histogram_plotter",
+            lambda _args, _histogram_bins: _RecordingPlotter(),
+        )
+        return peaks
+
+    def _analyze(self, tmp_path: Path, source: list[str], *extra: str) -> None:
+        pixel_csv = tmp_path / "pixel_geometry.csv"
+        pixel_csv.write_text(self.PIXEL_CSV, encoding="utf-8")
+        rc = main(
+            [
+                "analyze",
+                *source,
+                "--histogram-pixel-geometry-csv",
+                str(pixel_csv),
+                "--histogram-q-max",
+                "100",
+                "--live-plot-mode",
+                "desktop",
+                *extra,
+            ]
+        )
+        assert rc == 0
+
+    def _two_equal_pulses(self, tmp_path: Path) -> Path:
+        return _write_adara(
+            tmp_path,
+            rtdl_packet(timestamp_s=100, charge_10pc=400),
+            event_packet([(1, 1)] * 4, timestamp_s=100),
+            rtdl_packet(timestamp_s=101, charge_10pc=400),
+            event_packet([(1, 1)] * 4, timestamp_s=101),
+        )
+
+    def test_adara_live_plot_is_divided_by_the_charge_accumulated_so_far(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        peaks = self._record_plot_frames(monkeypatch)
+
+        self._analyze(tmp_path, ["--adara-file", str(self._two_equal_pulses(tmp_path))])
+
+        # 4 events / 4000 pC after the first pulse, 8 / 8000 pC after the second: constant.
+        assert peaks
+        assert peaks == [pytest.approx(4 / 4000)] * len(peaks)
+
+    def test_adara_live_plot_shows_raw_counts_when_normalization_is_off(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        peaks = self._record_plot_frames(monkeypatch)
+
+        self._analyze(tmp_path, ["--adara-file", str(self._two_equal_pulses(tmp_path))], "--normalize-by", "none")
+
+        assert peaks[0] == pytest.approx(4.0)
+        assert peaks[-1] == pytest.approx(8.0)
+
+    def test_adara_live_plot_applies_the_background_subtraction(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        peaks = self._record_plot_frames(monkeypatch)
+        background_csv = tmp_path / "background.csv"
+        background_csv.write_text(
+            f"Q value,I(Q),Error I(Q),{PROTON_CHARGE_COLUMN},{DURATION_COLUMN}\n99.01,2.0,1.0,8000.0,1.0\n",
+            encoding="utf-8",
+        )
+
+        self._analyze(
+            tmp_path,
+            ["--adara-file", str(self._two_equal_pulses(tmp_path))],
+            "--background-subtraction",
+            str(background_csv),
+        )
+
+        assert peaks
+        assert peaks == [pytest.approx(4 / 4000 - 2 / 8000)] * len(peaks)
+
+    def test_nexus_live_plot_is_divided_by_the_charge_attributed_so_far(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """NeXus attributes the run charge by events processed, so each chunk stays on scale."""
+        peaks = self._record_plot_frames(monkeypatch)
+        nexus_path = tmp_path / "sample.nxs.h5"
+        with h5py.File(nexus_path, "w") as handle:
+            entry = handle.create_group("entry")
+            for bank in ("bank1_events", "bank2_events"):
+                events = entry.create_group(bank)
+                events.create_dataset("event_id", data=np.array([1, 1], dtype=np.int32))
+                events.create_dataset("event_time_offset", data=np.array([1.0, 1.0]))
+            entry.create_dataset("proton_charge", data=np.array([8000.0]))
+            entry.create_dataset("duration", data=np.array([2.0]))
+
+        self._analyze(tmp_path, ["--nexus-file", str(nexus_path)])
+
+        assert len(peaks) >= 2
+        assert peaks == [pytest.approx(4 / 8000)] * len(peaks)
+
+    def test_correction_csvs_are_read_once_rather_than_on_every_plot_refresh(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """The plot refreshes every packet by default; re-reading the CSVs each time stalls a live stream."""
+        self._record_plot_frames(monkeypatch)
+        background_csv = tmp_path / "background.csv"
+        background_csv.write_text("Q value,I(Q),Error I(Q)\n99.01,2.0,1.0\n", encoding="utf-8")
+        reads: list[str] = []
+        original = histogram_module.load_correction_csv
+
+        def _counting_load(csv_path, *args, **kwargs):
+            reads.append(csv_path)
+            return original(csv_path, *args, **kwargs)
+
+        monkeypatch.setattr(histogram_module, "load_correction_csv", _counting_load)
+        packets = []
+        for pulse in range(10):
+            packets += [rtdl_packet(timestamp_s=100 + pulse, charge_10pc=400), event_packet([(1, 1)], 100 + pulse)]
+
+        self._analyze(
+            tmp_path,
+            ["--adara-file", str(_write_adara(tmp_path, *packets))],
+            "--background-subtraction",
+            str(background_csv),
+        )
+
+        assert reads == [str(background_csv)]

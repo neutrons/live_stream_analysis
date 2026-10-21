@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import math
 from dataclasses import dataclass
 
 try:
@@ -18,7 +17,7 @@ except ImportError:  # pragma: no cover
 
 from ..statistics import RunStatistics
 from .histogram import PixelQConversion, pixel_tof_to_q
-from .live_plot import HistogramPlotter, maybe_update_live_plot
+from .live_plot import DisplayTransform, HistogramPlotter, maybe_update_live_plot
 
 LOGGER = logging.getLogger(__name__)
 
@@ -127,7 +126,14 @@ def accumulate_adara_histogram(  # noqa: C901
     histogram_state_callback=None,
     hist: list[int] | None = None,
     run_statistics: RunStatistics | None = None,
+    display_transform: DisplayTransform | None = None,
 ) -> tuple[int, int, int, list[int], AdaraHistogramStats]:
+    """Histogram ADARA events into Q bins, refreshing the live plot as packets arrive.
+
+    ``display_transform`` turns the raw histogram into what the plot shows -- normally the
+    corrected, exposure-normalized I(Q). Charge and time are accumulated before each refresh,
+    so the plotted values are always divided by the exposure that produced them.
+    """
     stats = AdaraHistogramStats()
     if hist is None:
         hist = [0] * histogram_bins
@@ -183,11 +189,12 @@ def accumulate_adara_histogram(  # noqa: C901
             maybe_update_live_plot(
                 plotter,
                 hist,
-                [math.sqrt(float(value)) for value in hist],
+                None,
                 live_plot_refresh_every,
                 stats.packet_count,
                 force=True,
                 statistics_series=run_statistics.series if run_statistics is not None else None,
+                display_transform=display_transform,
             )
             if histogram_callback is not None:
                 histogram_callback(stats.histogram_events, hist)
@@ -261,10 +268,11 @@ def accumulate_adara_histogram(  # noqa: C901
         maybe_update_live_plot(
             plotter,
             hist,
-            [math.sqrt(float(value)) for value in hist],
+            None,
             live_plot_refresh_every,
             stats.packet_count,
             statistics_series=run_statistics.series if run_statistics is not None else None,
+            display_transform=display_transform,
         )
         if histogram_callback is not None:
             histogram_callback(stats.histogram_events, hist)

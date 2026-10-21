@@ -6,6 +6,8 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..correction_totals import CorrectionTotals, load_correction_totals
+
 TWO_PI = 2.0 * math.pi
 
 
@@ -193,20 +195,54 @@ def load_correction_csv(
     return values, errors
 
 
+def preload_corrections(runtime_state, args: argparse.Namespace, histogram_bins: int) -> None:
+    """Read the --background-subtraction and --normalization CSVs into the runtime state once.
+
+    apply_corrections runs on every live-plot refresh, which is every packet by default, so
+    reading the CSVs there would re-parse both files from disk tens of times a second. A
+    correction later posted over INTERSECT replaces these values, as it always has.
+    """
+    for csv_path, kind in ((args.background_subtraction, "background"), (args.normalization, "normalization")):
+        if csv_path is None:
+            continue
+        values, errors = load_correction_csv(
+            csv_path,
+            expected_bins=histogram_bins,
+            q_bin_size=args.histogram_q_bin_size,
+            q_min=args.histogram_q_min,
+            q_max=args.histogram_q_max,
+        )
+        setattr(runtime_state, f"{kind}_values", values)
+        setattr(runtime_state, f"{kind}_errors", errors)
+        setattr(runtime_state, f"{kind}_totals", load_correction_totals(csv_path))
+
+
 def apply_corrections(  # noqa: C901
     hist: list[int],
     args: argparse.Namespace,
     histogram_bins: int,
     runtime_state=None,
 ) -> tuple[list[float], list[float]]:
-    corrected = [float(value) for value in hist]
-    variance = [float(value) for value in hist]
+    """Return (S/Qs - B/Qb) / (V/Qv) and its propagated error.
+
+    Each term is divided by the exposure that produced it -- the sample by what it has
+    accumulated so far, background and normalization by the totals the preparer recorded --
+    so a background measured for twice as long as the sample is subtracted at half weight.
+    A correction without recorded totals falls back to the pre-#37 behaviour: the background
+    rides on the sample's scale, and the normalization is used as-is.
+    """
+    sample_divisor = _accumulation_divisor(args, runtime_state)
+    sample_scale = 1.0 / sample_divisor if sample_divisor is not None else 1.0
+    corrected = [float(value) * sample_scale for value in hist]
+    variance = [float(value) * sample_scale**2 for value in hist]
 
     background = None
     background_error = None
+    background_totals = None
     if runtime_state is not None and runtime_state.background_values is not None:
         background = runtime_state.background_values
         background_error = runtime_state.background_errors or [0.0] * len(background)
+        background_totals = runtime_state.background_totals
     elif args.background_subtraction is not None:
         background, background_error = load_correction_csv(
             args.background_subtraction,
@@ -215,19 +251,26 @@ def apply_corrections(  # noqa: C901
             q_min=args.histogram_q_min,
             q_max=args.histogram_q_max,
         )
+        background_totals = load_correction_totals(args.background_subtraction)
 
     if background is not None and background_error is not None:
-        corrected = [value - background_value for value, background_value in zip(corrected, background)]
+        background_scale = _correction_scale(args, sample_divisor, background_totals, fallback=sample_scale)
+        corrected = [
+            value - background_value * background_scale
+            for value, background_value in zip(corrected, background, strict=True)
+        ]
         variance = [
-            value_variance + background_sigma**2
+            value_variance + (background_sigma * background_scale) ** 2
             for value_variance, background_sigma in zip(variance, background_error, strict=True)
         ]
 
     normalization = None
     normalization_error = None
+    normalization_totals = None
     if runtime_state is not None and runtime_state.normalization_values is not None:
         normalization = runtime_state.normalization_values
         normalization_error = runtime_state.normalization_errors or [0.0] * len(normalization)
+        normalization_totals = runtime_state.normalization_totals
     elif args.normalization is not None:
         normalization, normalization_error = load_correction_csv(
             args.normalization,
@@ -236,8 +279,12 @@ def apply_corrections(  # noqa: C901
             q_min=args.histogram_q_min,
             q_max=args.histogram_q_max,
         )
+        normalization_totals = load_correction_totals(args.normalization)
 
     if normalization is not None and normalization_error is not None:
+        normalization_scale = _correction_scale(args, sample_divisor, normalization_totals, fallback=1.0)
+        normalization = [value * normalization_scale for value in normalization]
+        normalization_error = [sigma * normalization_scale for sigma in normalization_error]
         next_corrected: list[float] = []
         next_variance: list[float] = []
         for value, value_variance, norm, norm_sigma in zip(
@@ -276,13 +323,26 @@ def apply_corrections(  # noqa: C901
         corrected = [(value / coherent_length_squared) + (1.0 - laue_monotonic_diffuse_scat) for value in corrected]
         variance = [value / (coherent_length_squared**2) for value in variance]
 
-    divisor = _accumulation_divisor(args, runtime_state)
-    if divisor is not None:
-        corrected = [value / divisor for value in corrected]
-        variance = [value / (divisor**2) for value in variance]
-
     error = [math.sqrt(max(value, 0.0)) for value in variance]
     return corrected, error
+
+
+def _correction_scale(
+    args: argparse.Namespace,
+    sample_divisor: float | None,
+    totals: CorrectionTotals | None,
+    *,
+    fallback: float,
+) -> float:
+    """Return the factor that puts a correction on the same per-exposure scale as the sample.
+
+    Until the sample itself has something to divide by it is still in raw counts, and dividing
+    only the correction would subtract counts-per-charge from counts, so it stays unscaled too.
+    """
+    if sample_divisor is None:
+        return 1.0
+    divisor = totals.divisor(getattr(args, "normalize_by", "none")) if totals is not None else None
+    return 1.0 / divisor if divisor is not None else fallback
 
 
 def _accumulation_divisor(args: argparse.Namespace, runtime_state) -> float | None:

@@ -17,7 +17,8 @@ from live_stream_analysis.analyzer.histogram import (
     validate_histogram_args,
     write_histogram_csv,
 )
-from live_stream_analysis.analyzer.live_plot import LiveHistogramPlotter, _BrowserPlotState
+from live_stream_analysis.analyzer.live_plot import LiveHistogramPlotter, _BrowserPlotState, maybe_update_live_plot
+from live_stream_analysis.correction_totals import DURATION_COLUMN, PROTON_CHARGE_COLUMN, CorrectionTotals
 from live_stream_analysis.intersect.service import HistogramRuntimeState
 
 
@@ -249,6 +250,146 @@ def test_relative_uncertainty_is_invariant_under_accumulation_normalization():
     ]
 
 
+def _state_with_corrections(
+    *,
+    elapsed_seconds: float,
+    proton_charge_pc: float,
+    background: tuple[list[float], list[float], CorrectionTotals | None] | None = None,
+    normalization: tuple[list[float], list[float], CorrectionTotals | None] | None = None,
+) -> HistogramRuntimeState:
+    state = _runtime_state_with(elapsed_seconds, proton_charge_pc)
+    if background is not None:
+        state.background_values, state.background_errors, state.background_totals = background
+    if normalization is not None:
+        state.normalization_values, state.normalization_errors, state.normalization_totals = normalization
+    return state
+
+
+def test_apply_corrections_scales_the_background_by_its_own_proton_charge():
+    """Issue #37: subtract counts-per-charge from counts-per-charge, not raw from raw.
+
+    The background run collected 2 pC and the sample 4 pC, so the background contributes
+    B/2 to a sample scaled by 1/4 -- not B/4 as it would if it rode on the sample's charge.
+    """
+    state = _state_with_corrections(
+        elapsed_seconds=99.0,
+        proton_charge_pc=4.0,
+        background=([10.0, 10.0], [2.0, 2.0], CorrectionTotals(proton_charge_pc=2.0, duration_s=1.0)),
+    )
+
+    corrected, error = apply_corrections([40, 80], _normalization_args("proton-charge"), 2, runtime_state=state)
+
+    assert corrected == [pytest.approx(40 / 4 - 10 / 2), pytest.approx(80 / 4 - 10 / 2)]
+    # var = S/Qs^2 + sigma_B^2/Qb^2
+    assert error == [pytest.approx(math.sqrt(40 / 16 + 4 / 4)), pytest.approx(math.sqrt(80 / 16 + 4 / 4))]
+
+
+def test_apply_corrections_scales_the_normalization_by_its_own_proton_charge():
+    state = _state_with_corrections(
+        elapsed_seconds=99.0,
+        proton_charge_pc=4.0,
+        background=([10.0, 10.0], [2.0, 2.0], CorrectionTotals(proton_charge_pc=2.0, duration_s=1.0)),
+        normalization=([20.0, 40.0], [10.0, 0.0], CorrectionTotals(proton_charge_pc=10.0, duration_s=1.0)),
+    )
+
+    corrected, error = apply_corrections([40, 80], _normalization_args("proton-charge"), 2, runtime_state=state)
+
+    # (S/Qs - B/Qb) / (V/Qv) with V/Qv = [2, 4] and sigma_V/Qv = [1, 0].
+    assert corrected == [pytest.approx(5.0 / 2.0), pytest.approx(15.0 / 4.0)]
+    expected_variance = [
+        (40 / 16 + 1.0) / 2.0**2 + (5.0**2) * 1.0**2 / 2.0**4,
+        (80 / 16 + 1.0) / 4.0**2,
+    ]
+    assert error == [pytest.approx(math.sqrt(value)) for value in expected_variance]
+
+
+def test_apply_corrections_with_equal_exposures_matches_the_unnormalized_ratio():
+    """With every run at the same charge the exposure cancels out of (S - B)/V exactly."""
+    totals = CorrectionTotals(proton_charge_pc=7.0, duration_s=1.0)
+    background = ([3.0, 5.0], [1.0, 1.0], totals)
+    normalization = ([8.0, 16.0], [0.5, 0.5], totals)
+    normalized_state = _state_with_corrections(
+        elapsed_seconds=1.0, proton_charge_pc=7.0, background=background, normalization=normalization
+    )
+    raw_state = _state_with_corrections(
+        elapsed_seconds=1.0, proton_charge_pc=7.0, background=background, normalization=normalization
+    )
+
+    normalized, normalized_error = apply_corrections(
+        [19, 37], _normalization_args("proton-charge"), 2, runtime_state=normalized_state
+    )
+    raw, raw_error = apply_corrections([19, 37], _normalization_args("none"), 2, runtime_state=raw_state)
+
+    assert normalized == [pytest.approx(value) for value in raw]
+    assert normalized_error == [pytest.approx(value) for value in raw_error]
+
+
+def test_apply_corrections_scales_corrections_by_their_duration_when_normalizing_by_time():
+    state = _state_with_corrections(
+        elapsed_seconds=4.0,
+        proton_charge_pc=1.0e6,
+        background=([10.0, 10.0], [2.0, 2.0], CorrectionTotals(proton_charge_pc=1.0e9, duration_s=2.0)),
+    )
+
+    corrected, _ = apply_corrections([40, 80], _normalization_args("time"), 2, runtime_state=state)
+
+    assert corrected == [pytest.approx(40 / 4 - 10 / 2), pytest.approx(80 / 4 - 10 / 2)]
+
+
+def test_apply_corrections_keeps_legacy_behaviour_for_corrections_without_totals():
+    """A CSV from before #37 has no totals, so it is subtracted on the sample's own scale."""
+    state = _state_with_corrections(
+        elapsed_seconds=99.0,
+        proton_charge_pc=4.0,
+        background=([10.0, 10.0], [2.0, 2.0], None),
+    )
+
+    corrected, _ = apply_corrections([40, 80], _normalization_args("proton-charge"), 2, runtime_state=state)
+
+    assert corrected == [pytest.approx((40 - 10) / 4), pytest.approx((80 - 10) / 4)]
+
+
+def test_apply_corrections_ignores_correction_totals_when_normalize_by_is_none():
+    state = _state_with_corrections(
+        elapsed_seconds=99.0,
+        proton_charge_pc=4.0,
+        background=([10.0, 10.0], [2.0, 2.0], CorrectionTotals(proton_charge_pc=2.0, duration_s=1.0)),
+    )
+
+    corrected, _ = apply_corrections([40, 80], _normalization_args("none"), 2, runtime_state=state)
+
+    assert corrected == [pytest.approx(30.0), pytest.approx(70.0)]
+
+
+def test_apply_corrections_stays_on_raw_counts_until_the_sample_accumulates_charge():
+    """Mixing a charge-normalized background into raw sample counts would mix units."""
+    state = _state_with_corrections(
+        elapsed_seconds=0.0,
+        proton_charge_pc=0.0,
+        background=([10.0, 10.0], [2.0, 2.0], CorrectionTotals(proton_charge_pc=2.0, duration_s=1.0)),
+    )
+
+    corrected, _ = apply_corrections([40, 80], _normalization_args("proton-charge"), 2, runtime_state=state)
+
+    assert corrected == [pytest.approx(30.0), pytest.approx(70.0)]
+
+
+def test_apply_corrections_reads_totals_from_cli_correction_csvs(tmp_path: Path):
+    header = f"Q value,I(Q),Error I(Q),{PROTON_CHARGE_COLUMN},{DURATION_COLUMN}"
+    background_csv = tmp_path / "background.csv"
+    background_csv.write_text(f"{header}\n0.01,10.0,2.0,2.0,1.0\n0.03,10.0,2.0,2.0,1.0\n", encoding="utf-8")
+    normalization_csv = tmp_path / "normalization.csv"
+    normalization_csv.write_text(f"{header}\n0.01,20.0,0.0,10.0,1.0\n0.03,40.0,0.0,10.0,1.0\n", encoding="utf-8")
+    args = _normalization_args("proton-charge")
+    args.background_subtraction = str(background_csv)
+    args.normalization = str(normalization_csv)
+    state = _runtime_state_with(elapsed_seconds=99.0, proton_charge_pc=4.0)
+
+    corrected, _ = apply_corrections([40, 80], args, 2, runtime_state=state)
+
+    assert corrected == [pytest.approx(5.0 / 2.0), pytest.approx(15.0 / 4.0)]
+
+
 def test_validate_rejects_a_statistics_window_entirely_above_the_histogram():
     """An out-of-range window selects no bins and would silently produce an empty series."""
     args = argparse.Namespace(
@@ -280,3 +421,45 @@ def test_validate_rejects_a_statistics_window_entirely_below_the_histogram():
 
     with pytest.raises(ValueError, match="--statistics-q-max must be > --histogram-q-min"):
         validate_histogram_args(args)
+
+
+class _CountingPlotter:
+    def __init__(self):
+        self.frames: list[tuple[list[float], list[float]]] = []
+
+    def update(self, intensity, error, _relative_uncertainty, _statistics=None):
+        self.frames.append((intensity, error))
+
+
+def test_maybe_update_live_plot_applies_the_display_transform():
+    plotter = _CountingPlotter()
+
+    maybe_update_live_plot(
+        plotter, [4, 16], None, 1, 1, display_transform=lambda hist: ([v / 4 for v in hist], [1.0, 2.0])
+    )
+
+    assert plotter.frames == [([1.0, 4.0], [1.0, 2.0])]
+
+
+def test_maybe_update_live_plot_only_runs_the_transform_when_a_refresh_is_due():
+    """Corrections cost a pass over every bin, so throttled packets must not pay for them."""
+    plotter = _CountingPlotter()
+    calls: list[int] = []
+
+    def _transform(hist):
+        calls.append(1)
+        return [float(v) for v in hist], [0.0] * len(hist)
+
+    for index in range(1, 11):
+        maybe_update_live_plot(plotter, [1], None, 5, index, display_transform=_transform)
+
+    assert len(calls) == 2
+    assert len(plotter.frames) == 2
+
+
+def test_maybe_update_live_plot_defaults_to_raw_counts_and_poisson_error():
+    plotter = _CountingPlotter()
+
+    maybe_update_live_plot(plotter, [4, 9], None, 1, 1)
+
+    assert plotter.frames == [([4.0, 9.0], [2.0, 3.0])]

@@ -137,21 +137,28 @@ def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
     parser.add_argument(
         "--background-subtraction",
         metavar="FILE",
-        help="Optional three-column CSV with Q value, I(Q), Error I(Q) to subtract from the histogrammed signal.",
+        help=(
+            "Optional CSV with Q value, I(Q), Error I(Q) to subtract from the histogrammed signal. "
+            "Proton charge (pC) and Duration (s) columns, as written by the preparer, scale it by its own exposure."
+        ),
     )
     parser.add_argument(
         "--normalization",
         metavar="FILE",
-        help="Optional three-column CSV with Q value, I(Q), Error I(Q) used to normalize the histogrammed signal.",
+        help=(
+            "Optional CSV with Q value, I(Q), Error I(Q) used to normalize the histogrammed signal. "
+            "Proton charge (pC) and Duration (s) columns, as written by the preparer, scale it by its own exposure."
+        ),
     )
     parser.add_argument(
         "--normalize-by",
         choices=("proton-charge", "time", "none"),
         default="proton-charge",
         help=(
-            "Normalize the histogrammed signal by integrated proton charge or accumulated run time "
-            "(default: proton-charge). Counts are reported unscaled until the chosen quantity starts "
-            "accumulating, and when the source reports neither. Use 'none' for raw counts."
+            "Normalize the histogrammed signal by integrated proton charge or accumulated run time, "
+            "and background/normalization CSVs by their recorded totals (default: proton-charge). "
+            "Counts are reported unscaled until the chosen quantity starts accumulating, and when "
+            "the source reports neither. Use 'none' for raw counts."
         ),
     )
     parser.add_argument(
