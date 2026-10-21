@@ -3,10 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import socketserver
 import sys
 import threading
 import webbrowser
+from collections.abc import Callable
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Protocol
@@ -492,23 +494,43 @@ def create_live_histogram_plotter(args: argparse.Namespace, histogram_bins: int)
     )
 
 
+DisplayTransform = Callable[[list[int]], tuple[list[float], list[float]]]
+
+
+def raw_counts_display(hist: list[int] | list[float]) -> tuple[list[float], list[float]]:
+    """Show the histogram as raw counts with Poisson errors."""
+    return [float(value) for value in hist], [math.sqrt(max(float(value), 0.0)) for value in hist]
+
+
 def maybe_update_live_plot(
     plotter: HistogramPlotter,
     hist: list[int] | list[float],
-    error: list[float],
+    error: list[float] | None,
     refresh_every: int,
     update_index: int,
     *,
     force: bool = False,
     statistics_series=None,
+    display_transform: DisplayTransform | None = None,
 ) -> None:
+    """Refresh the plot if due, showing ``hist`` through ``display_transform`` when given.
+
+    The accumulation loops pass the raw histogram plus a transform that applies the run's
+    corrections and exposure normalization, so the plot shows the same I(Q) the run will
+    report. Without ``error`` or a transform, the histogram is shown as raw counts.
+    """
     if not force and update_index % refresh_every != 0:
         return
 
-    # Snapshotting copies the whole series, so it happens after the throttle check rather
-    # than on every packet.
+    # Snapshotting copies the whole series, and the transform makes a pass over every bin, so
+    # both happen after the throttle check rather than on every packet.
     statistics = statistics_series.snapshot() if statistics_series is not None else None
-    intensity = [float(value) for value in hist]
+    if display_transform is not None:
+        intensity, error = display_transform(hist)
+    elif error is None:
+        intensity, error = raw_counts_display(hist)
+    else:
+        intensity = [float(value) for value in hist]
     plotter.update(intensity, error, compute_relative_uncertainty(intensity, error), statistics)
 
 
@@ -894,7 +916,7 @@ def _browser_plot_html() -> str:
             </div>
             <div class=\"metrics\">
                 <div class=\"metric\"><span class=\"metric-label\">Plot updates</span><span class=\"metric-value\" id=\"update-count\">0</span></div>
-                <div class=\"metric\"><span class=\"metric-label\">Total counts</span><span class=\"metric-value\" id=\"total-counts\">0</span></div>
+                <div class=\"metric\"><span class=\"metric-label\">Total I(Q)</span><span class=\"metric-value\" id=\"total-counts\">0</span></div>
                 <div class=\"metric\"><span class=\"metric-label\">Nonzero bins</span><span class=\"metric-value\" id=\"nonzero-bins\">0</span></div>
                 <div class=\"metric\"><span class=\"metric-label\">Peak I(Q)</span><span class=\"metric-value\" id=\"max-intensity\">0</span></div>
                 <div class=\"metric\"><span class=\"metric-label\">Mean sigma / I(Q)</span><span class=\"metric-value\" id=\"mean-relative-uncertainty\">0</span></div>
@@ -1698,6 +1720,22 @@ def _browser_plot_html() -> str:
 
         applyStatisticsView();
 
+        // Normalized by proton charge, I(Q) is counts per pC -- around 1e-7 -- so a fixed number
+        // of decimal places would round every readout to zero.
+        function formatMagnitude(value) {
+            const magnitude = Math.abs(value);
+            if (magnitude === 0) {
+                return '0';
+            }
+            if (magnitude >= 1000) {
+                return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
+            }
+            if (magnitude < 0.01) {
+                return value.toExponential(3);
+            }
+            return value.toLocaleString(undefined, { maximumSignificantDigits: 4 });
+        }
+
         function formatRange(values) {
             if (!values.length) {
                 return 'Waiting for data...';
@@ -1763,9 +1801,9 @@ def _browser_plot_html() -> str:
             runStateElement.style.borderColor = isClosed ? '#f0d3a6' : '#cfe4d2';
             runStateElement.style.color = isClosed ? '#8a5a00' : '#2f6b3b';
             document.getElementById('update-count').textContent = status.update_count.toLocaleString();
-            document.getElementById('total-counts').textContent = status.total_counts.toLocaleString(undefined, { maximumFractionDigits: 0 });
+            document.getElementById('total-counts').textContent = formatMagnitude(status.total_counts);
             document.getElementById('nonzero-bins').textContent = status.nonzero_bins.toLocaleString();
-            document.getElementById('max-intensity').textContent = status.max_intensity.toLocaleString(undefined, { maximumFractionDigits: 2 });
+            document.getElementById('max-intensity').textContent = formatMagnitude(status.max_intensity);
             document.getElementById('mean-relative-uncertainty').textContent = status.mean_relative_uncertainty.toLocaleString(undefined, { maximumFractionDigits: 4 });
             document.getElementById('elapsed-seconds').textContent = status.elapsed_seconds.toLocaleString(undefined, { maximumFractionDigits: 1 });
             document.getElementById('proton-charge').textContent = status.proton_charge_pc.toLocaleString(undefined, { maximumFractionDigits: 0 });

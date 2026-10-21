@@ -9,7 +9,7 @@ import h5py
 
 from ..statistics import RunStatistics
 from .histogram import PixelQConversion, pixel_tof_to_q
-from .live_plot import HistogramPlotter, maybe_update_live_plot
+from .live_plot import DisplayTransform, HistogramPlotter, maybe_update_live_plot
 
 DEFAULT_NEXUS_CHUNK_SIZE = 250_000
 LOGGER = logging.getLogger(__name__)
@@ -121,6 +121,7 @@ def accumulate_nexus_histogram(  # noqa: C901
     histogram_callback=None,
     hist: list[int] | None = None,
     run_statistics: RunStatistics | None = None,
+    display_transform: DisplayTransform | None = None,
 ) -> tuple[int, int, int, list[int], None]:
     packet_count = 0
     total_events = 0
@@ -161,10 +162,11 @@ def accumulate_nexus_histogram(  # noqa: C901
                         maybe_update_live_plot(
                             plotter,
                             hist,
-                            [math.sqrt(float(value)) for value in hist],
+                            None,
                             live_plot_refresh_every,
                             processed_chunks,
                             statistics_series=run_statistics.series if run_statistics is not None else None,
+                            display_transform=display_transform,
                         )
                         if histogram_callback is not None:
                             histogram_callback(histogram_events, hist)
@@ -192,10 +194,11 @@ def accumulate_nexus_histogram(  # noqa: C901
                     maybe_update_live_plot(
                         plotter,
                         hist,
-                        [math.sqrt(float(value)) for value in hist],
+                        None,
                         live_plot_refresh_every,
                         processed_chunks,
                         statistics_series=run_statistics.series if run_statistics is not None else None,
+                        display_transform=display_transform,
                     )
                     if histogram_callback is not None:
                         histogram_callback(histogram_events, hist)

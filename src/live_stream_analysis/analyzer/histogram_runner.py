@@ -8,6 +8,7 @@ import sys
 import time
 from pathlib import Path
 
+from ..correction_totals import load_correction_totals
 from ..intersect import (
     build_histogram_payload,
     build_run_complete_payload,
@@ -29,6 +30,7 @@ from .histogram import (
     bin_centre_q_values,
     compute_relative_uncertainty,
     load_pixel_q_conversion,
+    preload_corrections,
     validate_histogram_args,
     write_histogram_csv,
 )
@@ -65,6 +67,27 @@ def _write_histogram_output(
         print(f"Error writing histogram output: {exc}", file=sys.stderr)
         return False
     return True
+
+
+def _warn_if_correction_lacks_totals(csv_path: str, kind: str, normalize_by: str) -> None:
+    """Flag a correction that will not be put on the sample's per-exposure scale.
+
+    Without its own totals a background is subtracted as though it were measured for exactly
+    as long as the sample, which silently skews the result whenever the two exposures differ.
+    """
+    if normalize_by == "none":
+        return
+    totals = load_correction_totals(csv_path)
+    if totals.divisor(normalize_by) is None:
+        LOGGER.warning(
+            "%s CSV %s records no %s total; it will not be normalized by its own exposure. "
+            "Regenerate it with the preparer to include one.",
+            kind,
+            Path(csv_path).resolve(),
+            "proton charge" if normalize_by == "proton-charge" else "duration",
+        )
+    else:
+        LOGGER.info("%s CSV exposure totals: %s", kind, totals)
 
 
 def _configure_logging(args: argparse.Namespace) -> None:
@@ -120,8 +143,11 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:  # noqa: C901
         LOGGER.info("Loaded pixel geometry for %s detector ids", len(q_conversion.q_matrix_constants))
         if args.background_subtraction is not None:
             LOGGER.info("Background subtraction enabled: %s", Path(args.background_subtraction).resolve())
+            _warn_if_correction_lacks_totals(args.background_subtraction, "Background", args.normalize_by)
         if args.normalization is not None:
             LOGGER.info("Normalization enabled: %s", Path(args.normalization).resolve())
+            _warn_if_correction_lacks_totals(args.normalization, "Normalization", args.normalize_by)
+        preload_corrections(runtime_state, args, histogram_bins)
         if args.histogram_output_csv is not None:
             LOGGER.info("Histogram CSV output will be written to %s", Path(args.histogram_output_csv).resolve())
         LOGGER.info("Live plot mode: %s", args.live_plot_mode or "disabled")
@@ -325,6 +351,11 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:  # noqa: C901
                     histogram_state_callback=_set_active_hist,
                     hist=active_hist,
                     run_statistics=runtime_state.run_statistics,
+                    # The plot shows the same corrected, exposure-normalized I(Q) as the CSV and
+                    # INTERSECT events, rather than raw counts that only ever grow.
+                    display_transform=lambda hist: apply_corrections(
+                        hist, args, histogram_bins, runtime_state=runtime_state
+                    ),
                 )
             except STREAM_DROP_ERRORS as exc:
                 if args.adara_stream is None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import logging
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,17 +11,26 @@ from pathlib import Path
 import h5py
 import numpy as np
 
+from ..correction_totals import DURATION_COLUMN, PROTON_CHARGE_COLUMN
 from .instrument import build_detector_geometry
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
 class ReductionResult:
-    """Reduced Q-space result with propagated counting error."""
+    """Reduced Q-space result with propagated counting error.
+
+    ``proton_charge_pc`` and ``duration_s`` are the exposure behind ``intensity``, summed over
+    the input files, or None when any file did not record them.
+    """
 
     q_values: np.ndarray
     intensity: np.ndarray
     error: np.ndarray
     total_counts: int
+    proton_charge_pc: float | None = None
+    duration_s: float | None = None
 
 
 def _read_embedded_idf(nexus_path: Path) -> str:
@@ -49,6 +59,40 @@ def _build_q_lookup(geometry_rows: list[tuple[int, float, float, float, float]])
     for pixel_id, _, _, _, q_matrix_element in geometry_rows:
         lookup[pixel_id] = q_matrix_element
     return lookup
+
+
+def _read_run_total(nexus_path: Path, name: str) -> float | None:
+    """Return a run-level scalar such as entry/proton_charge (pC) or entry/duration (s)."""
+    with h5py.File(nexus_path, "r") as handle:
+        dataset = handle["entry"].get(name)
+        if dataset is None:
+            return None
+        value = dataset[()]
+    try:
+        return float(value[0] if hasattr(value, "__len__") else value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _sum_run_totals(nexus_files: list[Path], name: str) -> float | None:
+    """Sum a run total over every file, or None if any file lacks it.
+
+    A partial sum would understate the exposure behind the summed counts, and the analyzer
+    would then over-weight the correction by exactly the missing share.
+    """
+    total = 0.0
+    for nexus_path in nexus_files:
+        value = _read_run_total(nexus_path, name)
+        if value is None:
+            LOGGER.warning(
+                "NeXus file %s has no entry/%s; the correction CSV will leave that total blank "
+                "and the analyzer will not normalize this correction by it",
+                nexus_path,
+                name,
+            )
+            return None
+        total += value
+    return total
 
 
 def _iter_event_groups(handle: h5py.File):
@@ -148,22 +192,38 @@ def reduce_nexus_files(
         total_counts += file_total
 
     q_values = q_min + (np.arange(histogram_bins, dtype=np.float64) + 0.5) * q_bin_size
-    intensity = counts / max(len(nexus_files), 1)
-    error = np.sqrt(counts) / max(len(nexus_files), 1)
+    # Summed, not averaged over files: the CSV records the summed exposure alongside, and the
+    # analyzer divides one by the other. Averaging the counts would halve every correction
+    # for each extra file reduced.
+    intensity = counts
+    error = np.sqrt(counts)
 
     if mode == "normalization":
         intensity = _strip_vanadium_peaks(intensity, peak_window, peak_z_threshold)
-        error = np.maximum(error, np.sqrt(np.clip(intensity, 0.0, None)) / max(len(nexus_files), 1))
+        error = np.maximum(error, np.sqrt(np.clip(intensity, 0.0, None)))
 
-    return ReductionResult(q_values=q_values, intensity=intensity, error=error, total_counts=total_counts)
+    return ReductionResult(
+        q_values=q_values,
+        intensity=intensity,
+        error=error,
+        total_counts=total_counts,
+        proton_charge_pc=_sum_run_totals(nexus_files, "proton_charge"),
+        duration_s=_sum_run_totals(nexus_files, "duration"),
+    )
+
+
+def _format_total(value: float | None) -> str:
+    return "" if value is None else f"{value:.8f}"
 
 
 def write_reduction_csv(result: ReductionResult, output_csv: Path) -> None:
-    """Write Q, I(Q), and error columns to CSV."""
+    """Write Q, I(Q), and error columns to CSV, followed by the exposure totals on every row."""
     output_csv = output_csv.resolve()
     output_csv.parent.mkdir(parents=True, exist_ok=True)
+    proton_charge = _format_total(result.proton_charge_pc)
+    duration = _format_total(result.duration_s)
     with output_csv.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["Q value", "I(Q)", "Error I(Q)"])
+        writer.writerow(["Q value", "I(Q)", "Error I(Q)", PROTON_CHARGE_COLUMN, DURATION_COLUMN])
         for q_value, intensity, error in zip(result.q_values, result.intensity, result.error):
-            writer.writerow([f"{q_value:.8f}", f"{intensity:.8f}", f"{error:.8f}"])
+            writer.writerow([f"{q_value:.8f}", f"{intensity:.8f}", f"{error:.8f}", proton_charge, duration])

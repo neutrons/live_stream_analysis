@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from live_stream_analysis.correction_totals import DURATION_COLUMN, PROTON_CHARGE_COLUMN, CorrectionTotals
 from live_stream_analysis.intersect.data_models import CsvTextRequest, StartAdaraFileReadRequest
 from live_stream_analysis.intersect.service import HistogramRuntimeState, LiveStreamAnalysisCapability
 
@@ -40,6 +41,41 @@ def test_set_normalization_updates_live_histogram_state():
     assert response.kind == "normalization"
     assert capability.runtime_state.normalization_values == [10.0, 20.0]
     assert capability.runtime_state.normalization_errors == [1.0, 2.0]
+
+
+_CSV_WITH_TOTALS = "\n".join(
+    [
+        f"Q value,I(Q),Error I(Q),{PROTON_CHARGE_COLUMN},{DURATION_COLUMN}",
+        "0.01,10.0,1.0,2.0e12,1443.9",
+        "0.03,20.0,2.0,2.0e12,1443.9",
+    ]
+)
+
+
+def test_set_background_records_the_background_run_totals():
+    capability = LiveStreamAnalysisCapability()
+
+    capability.set_background(CsvTextRequest(csv_text=_CSV_WITH_TOTALS))
+
+    assert capability.runtime_state.background_totals == CorrectionTotals(proton_charge_pc=2.0e12, duration_s=1443.9)
+
+
+def test_set_normalization_records_the_normalization_run_totals():
+    capability = LiveStreamAnalysisCapability()
+
+    capability.set_normalization(CsvTextRequest(csv_text=_CSV_WITH_TOTALS))
+
+    assert capability.runtime_state.normalization_totals == CorrectionTotals(proton_charge_pc=2.0e12, duration_s=1443.9)
+
+
+def test_set_background_without_totals_clears_totals_from_a_previous_background():
+    """Stale totals from an earlier CSV would rescale the new background by the wrong exposure."""
+    capability = LiveStreamAnalysisCapability()
+    capability.set_background(CsvTextRequest(csv_text=_CSV_WITH_TOTALS))
+
+    capability.set_background(CsvTextRequest(csv_text="Q value,I(Q),Error I(Q)\n0.01,1.0,0.1\n0.03,2.0,0.2\n"))
+
+    assert capability.runtime_state.background_totals == CorrectionTotals()
 
 
 def test_set_pixel_geometry_conversion_updates_live_histogram_state():

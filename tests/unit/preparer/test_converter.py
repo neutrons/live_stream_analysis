@@ -1,15 +1,24 @@
+import csv
+import logging
+import math
 from pathlib import Path
 
 import h5py
 import numpy as np
 import pytest
 
+from live_stream_analysis.correction_totals import DURATION_COLUMN, PROTON_CHARGE_COLUMN
 from live_stream_analysis.main import main
 from live_stream_analysis.preparer.calibration import load_diffraction_calibration
 from live_stream_analysis.preparer.converter import write_pixel_geometry_csv
 from live_stream_analysis.preparer.instrument import build_detector_geometry
 
 TESTS_ROOT = Path(__file__).parents[2]
+# The first three columns are what every correction consumer has always read; the run totals
+# ride along as extra columns so those consumers keep working unchanged.
+REDUCTION_HEADER = f"Q value,I(Q),Error I(Q),{PROTON_CHARGE_COLUMN},{DURATION_COLUMN}"
+# 4492 / 1000 us puts the minimal IDF pixel at Q ~ 4.5, well inside the reduction range.
+IN_RANGE_TOF_US = 1000.0
 
 
 def _minimal_idf() -> str:
@@ -39,10 +48,22 @@ def _minimal_idf() -> str:
 """
 
 
-def _write_nexus(tmp_path: Path, name: str, event_ids: list[int], event_tofs: list[float]) -> Path:
+def _write_nexus(
+    tmp_path: Path,
+    name: str,
+    event_ids: list[int],
+    event_tofs: list[float],
+    *,
+    duration: float | None = None,
+    proton_charge: float | None = None,
+) -> Path:
     path = tmp_path / name
     with h5py.File(path, "w") as handle:
         entry = handle.create_group("entry")
+        if duration is not None:
+            entry.create_dataset("duration", data=np.array([duration], dtype=np.float64))
+        if proton_charge is not None:
+            entry.create_dataset("proton_charge", data=np.array([proton_charge], dtype=np.float64))
         instrument = entry.create_group("instrument")
         instrument_xml = instrument.create_group("instrument_xml")
         instrument_xml.create_dataset("data", data=np.array([_minimal_idf().encode("utf-8")]))
@@ -184,7 +205,7 @@ def test_preparer_calibration_file_adds_diffcal_and_use_columns(tmp_path: Path) 
     assert int(data_by_detector[masked_detector][7]) == 0
 
 
-def test_preparer_background_reduction_mode_writes_three_column_csv(tmp_path: Path) -> None:
+def test_preparer_background_reduction_mode_writes_correction_csv(tmp_path: Path) -> None:
     nexus_path = _write_nexus(tmp_path, "background.nxs.h5", [1, 1, 1], [1.0, 1.0, 1.0])
     output_csv = tmp_path / "background.csv"
 
@@ -206,7 +227,7 @@ def test_preparer_background_reduction_mode_writes_three_column_csv(tmp_path: Pa
 
     assert rc == 0
     lines = output_csv.read_text(encoding="utf-8").strip().splitlines()
-    assert lines[0] == "Q value,I(Q),Error I(Q)"
+    assert lines[0] == REDUCTION_HEADER
     assert len(lines) > 10
 
 
@@ -237,5 +258,61 @@ def test_preparer_normalization_reduction_mode_accepts_multiple_files(tmp_path: 
 
     assert rc == 0
     lines = output_csv.read_text(encoding="utf-8").strip().splitlines()
-    assert lines[0] == "Q value,I(Q),Error I(Q)"
+    assert lines[0] == REDUCTION_HEADER
     assert len(lines) > 10
+
+
+def _run_reduction(tmp_path: Path, mode: str, nexus_paths: list[Path]) -> list[dict[str, str]]:
+    output_csv = tmp_path / f"{mode}.csv"
+    argv = ["preparer", "--mode", mode, "--reduction-output-csv", str(output_csv), "--q-min", "0.0", "--q-max", "30.0"]
+    for nexus_path in nexus_paths:
+        argv += ["--nexus-file", str(nexus_path)]
+    assert main(argv) == 0
+    return list(csv.DictReader(output_csv.read_text(encoding="utf-8").splitlines()))
+
+
+@pytest.mark.parametrize("mode", ["background", "normalization"])
+def test_preparer_reduction_records_total_proton_charge_and_duration(tmp_path: Path, mode: str) -> None:
+    """Issue #37: the analyzer divides each correction by the exposure that produced it."""
+    nexus_a = _write_nexus(tmp_path, "a.nxs.h5", [1], [IN_RANGE_TOF_US], duration=600.0, proton_charge=1.25e12)
+    nexus_b = _write_nexus(tmp_path, "b.nxs.h5", [1], [IN_RANGE_TOF_US], duration=900.5, proton_charge=0.75e12)
+
+    rows = _run_reduction(tmp_path, mode, [nexus_a, nexus_b])
+
+    assert rows
+    for row in rows:
+        assert float(row[PROTON_CHARGE_COLUMN]) == pytest.approx(2.0e12)
+        assert float(row[DURATION_COLUMN]) == pytest.approx(1500.5)
+
+
+def test_preparer_background_intensity_is_summed_over_files_to_match_the_total_charge(tmp_path: Path) -> None:
+    """Counts and charge must cover the same exposure, so I(Q) sums the files rather than averaging."""
+    nexus_a = _write_nexus(
+        tmp_path, "a.nxs.h5", [1, 1], [IN_RANGE_TOF_US, IN_RANGE_TOF_US], duration=1.0, proton_charge=10.0
+    )
+    nexus_b = _write_nexus(tmp_path, "b.nxs.h5", [1], [IN_RANGE_TOF_US], duration=1.0, proton_charge=10.0)
+
+    rows = _run_reduction(tmp_path, "background", [nexus_a, nexus_b])
+
+    intensities = [float(row["I(Q)"]) for row in rows]
+    errors = [float(row["Error I(Q)"]) for row in rows]
+    peak = max(range(len(intensities)), key=intensities.__getitem__)
+    assert sum(intensities) == pytest.approx(3.0)
+    assert intensities[peak] == pytest.approx(3.0)
+    assert errors[peak] == pytest.approx(math.sqrt(3.0))
+
+
+def test_preparer_reduction_leaves_a_total_blank_when_any_file_lacks_it(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A partial charge sum would understate the exposure and over-weight the correction."""
+    nexus_a = _write_nexus(tmp_path, "a.nxs.h5", [1], [IN_RANGE_TOF_US], duration=600.0, proton_charge=1.0e12)
+    nexus_b = _write_nexus(tmp_path, "b.nxs.h5", [1], [IN_RANGE_TOF_US], duration=900.0)
+
+    with caplog.at_level(logging.WARNING):
+        rows = _run_reduction(tmp_path, "background", [nexus_a, nexus_b])
+
+    assert all(row[PROTON_CHARGE_COLUMN] == "" for row in rows)
+    assert all(float(row[DURATION_COLUMN]) == pytest.approx(1500.0) for row in rows)
+    assert "b.nxs.h5" in caplog.text
+    assert "proton_charge" in caplog.text

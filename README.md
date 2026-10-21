@@ -26,8 +26,10 @@ uv run live_stream_analysis preparer \
 
 ### Generate background and normalization CSVs from NeXus files
 
-The same `preparer` command also reduces event NeXus files into the three-column CSVs
-used by the analyzer for background subtraction and normalization.
+The same `preparer` command also reduces event NeXus files into the CSVs used by the
+analyzer for background subtraction and normalization. Alongside `Q value`, `I(Q)`, and
+`Error I(Q)`, each CSV records the total proton charge and duration of the runs it was
+reduced from, so the analyzer can put it on the same per-exposure scale as the sample.
 
 Use `--mode background` to build a background curve:
 
@@ -74,8 +76,12 @@ uv run live_stream_analysis preparer \
 
 Notes:
 
-1. Repeat `--nexus-file` to combine multiple runs into one reduced CSV.
-2. The output columns are `Q value`, `I(Q)`, and `Error I(Q)`.
+1. Repeat `--nexus-file` to combine multiple runs into one reduced CSV. Counts are summed
+   across the runs, matching the summed proton charge and duration.
+2. The output columns are `Q value`, `I(Q)`, `Error I(Q)`, `Proton charge (pC)`, and
+   `Duration (s)`. The last two repeat the same totals, read from each file's
+   `entry/proton_charge` and `entry/duration`, on every row. A total is left blank if any
+   input file lacks it.
 3. The current preparer reduction path uses a fixed `q_bin_size` of `0.02` and `tof_tick_us` of `1.0`.
 
 ### Optional: apply Mantid diffraction calibration
@@ -245,6 +251,26 @@ the live stream; for NeXus replays they are attributed from the run-level `entry
 Histograms are normalized by integrated proton charge by default, since that is the quantity
 runs are actually counted against. Pass `--normalize-by none` for raw counts.
 
+Background and normalization CSVs from the preparer are normalized by their own recorded
+totals, so the corrected histogram is
+
+```text
+I(Q) = (S / Q_sample - B / Q_background) / (V / Q_normalization)
+```
+
+where each `Q` is the proton charge (or, with `--normalize-by time`, the duration) of that
+measurement. A background measured for twice as long as the sample is then subtracted at half
+weight rather than in full. A correction CSV without these columns, such as one written by an
+older preparer, keeps the earlier behaviour: the background is subtracted on the sample's
+scale and the normalization is used as-is. The analyzer logs a warning at startup when that
+happens.
+
+The live plot (desktop and browser) shows this same corrected, normalized I(Q) on every
+refresh, using the charge or time accumulated up to that packet or chunk. For a steady
+source, I(Q) therefore holds roughly constant through the run while its error bars shrink,
+rather than climbing with the raw counts. The same totals are read from CSVs sent through the INTERSECT `set_background` and
+`set_normalization` messages.
+
 ```bash
 uv run live_stream_analysis analyze \
     --adara-stream bl1b-daq1.sns.gov 31415 \
@@ -260,7 +286,7 @@ uv run live_stream_analysis analyze \
 
 | Option | Purpose |
 | --- | --- |
-| `--normalize-by {proton-charge,time,none}` | Divide the corrected histogram by integrated proton charge or accumulated run time. Default `proton-charge`. Counts stay unscaled until the chosen quantity starts accumulating, and when the source reports neither, so a file without charge still yields raw counts. Pass `none` to opt out. |
+| `--normalize-by {proton-charge,time,none}` | Divide the sample by its integrated proton charge or accumulated run time, and each correction by its recorded total. Default `proton-charge`. Counts and corrections stay unscaled until the chosen quantity starts accumulating, and when the source reports neither, so a file without charge still yields raw counts. Pass `none` to opt out. |
 | `--statistics-output-csv FILE` | Write the decay series with columns `Elapsed time (s)`, `Proton charge (pC)`, `Mean sigma/I(Q)`, `Total counts`, `Nonzero bins`, `Histogrammed events`. |
 | `--statistics-map-output-csv FILE` | Write the 2D map: one row per sample, one column per Q in the window, prefixed by elapsed time and proton charge. |
 | `--statistics-q-min` / `--statistics-q-max` | Restrict the statistics to a Q window. Defaults to every populated bin. This window is also the Q extent of the 2D map. |
@@ -309,9 +335,10 @@ hours without a run boundary does not grow without limit. Thinning keeps the who
 than discarding the start of the run, since the steep early decay is the most informative part of
 the curve for a forecast.
 
-Note that sigma/I(Q) is unchanged by `--normalize-by`, since normalization scales the intensity
-and its uncertainty by the same divisor. The decay curve is therefore the same whether or not
-normalization is enabled.
+Without corrections, sigma/I(Q) is unchanged by `--normalize-by`, since normalization scales the
+intensity and its uncertainty by the same divisor. The decay curve is therefore the same whether
+or not normalization is enabled. With a background that carries its own totals, the background is
+re-weighted against the sample, so sigma/I(Q) shifts accordingly.
 
 The same `analyze` command also accepts event NeXus sample inputs. Repeat
 `--nexus-file` to combine multiple sample runs while keeping the same histogram,
