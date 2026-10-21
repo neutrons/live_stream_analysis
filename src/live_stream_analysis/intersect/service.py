@@ -14,6 +14,7 @@ from intersect_sdk import (
     intersect_status,
 )
 
+from ..statistics import RunStatistics
 from .config import build_service_config
 from .data_models import (
     CsvTextRequest,
@@ -53,6 +54,7 @@ class HistogramRuntimeState:
     correction_bins: int | None = None
     adara_file_read_released: bool = True
     adara_file_read_event: threading.Event = field(default_factory=threading.Event)
+    run_statistics: RunStatistics = field(default_factory=RunStatistics)
 
     def __post_init__(self) -> None:
         if self.adara_file_read_released:
@@ -78,9 +80,7 @@ class HistogramRuntimeState:
             self.correction_bins = len(values)
             return
         if len(values) != self.correction_bins:
-            raise ValueError(
-                f"{kind} correction CSV has {len(values)} bins but expected {self.correction_bins}"
-            )
+            raise ValueError(f"{kind} correction CSV has {len(values)} bins but expected {self.correction_bins}")
 
 
 def _load_correction_from_csv_text(csv_text: str) -> tuple[list[float], list[float]]:

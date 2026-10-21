@@ -4,20 +4,10 @@ from __future__ import annotations
 
 import argparse
 import logging
-import math
 import sys
 import time
 from pathlib import Path
 
-from . import nexus
-from .factory import build_reader, create_source_runner
-from .histogram import (
-    apply_corrections,
-    bin_centre_q_values,
-    load_pixel_q_conversion,
-    validate_histogram_args,
-    write_histogram_csv,
-)
 from ..intersect import (
     build_histogram_payload,
     build_run_complete_payload,
@@ -26,6 +16,22 @@ from ..intersect import (
     load_intersect_config,
 )
 from ..intersect.service import HistogramRuntimeState
+from ..statistics import (
+    StatisticsSample,
+    StatisticsWindow,
+    write_statistics_csv,
+    write_statistics_map_csv,
+)
+from . import nexus
+from .factory import build_reader, create_source_runner
+from .histogram import (
+    apply_corrections,
+    bin_centre_q_values,
+    compute_relative_uncertainty,
+    load_pixel_q_conversion,
+    validate_histogram_args,
+    write_histogram_csv,
+)
 from .live_plot import HistogramPlotter, create_live_histogram_plotter, maybe_update_live_plot
 
 LOGGER = logging.getLogger(__name__)
@@ -69,7 +75,7 @@ def _configure_logging(args: argparse.Namespace) -> None:
     )
 
 
-def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
+def _run_histogram_mode(reader, args: argparse.Namespace) -> int:  # noqa: C901
     plotter: HistogramPlotter | None = None
     publisher = None
     corrected_hist: list[float] = []
@@ -99,6 +105,16 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
         q_conversion = load_pixel_q_conversion(args.histogram_pixel_geometry_csv)
         runtime_state = HistogramRuntimeState(pixel_q_conversion=q_conversion)
         runtime_state.correction_bins = histogram_bins
+        q_values = bin_centre_q_values(args.histogram_q_min, args.histogram_q_bin_size, histogram_bins)
+        statistics_window = StatisticsWindow.build(q_values, args.statistics_q_min, args.statistics_q_max)
+        runtime_state.run_statistics.series.configure(args.statistics_sample_interval_seconds, statistics_window)
+        LOGGER.info(
+            "Error-decay statistics window: bins=%s map_columns=%s q_min=%s q_max=%s",
+            len(statistics_window.indices),
+            len(statistics_window.map_q_values),
+            args.statistics_q_min,
+            args.statistics_q_max,
+        )
         if args.adara_file_delay_intersect:
             runtime_state.configure_adara_file_read_gate(False)
         LOGGER.info("Loaded pixel geometry for %s detector ids", len(q_conversion.q_matrix_constants))
@@ -133,8 +149,45 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             LOGGER.info("Received INTERSECT start_adara_file_read signal")
         LOGGER.info("Beginning event accumulation")
 
+        def _record_statistics_sample(histogram_event_count: int, hist: list[int], *, force: bool = False) -> None:
+            """Append a point to the error-decay series if enough run time has accumulated.
+
+            The end of a run almost never lands on a sample boundary, so finalizing forces a
+            last point. Without it the series stops short of the totals it actually reached and
+            the final histogram gets published alongside a decay point from slightly earlier.
+            """
+            accumulator = runtime_state.run_statistics.accumulator
+            series = runtime_state.run_statistics.series
+            if not force and not series.is_due(accumulator.elapsed_seconds):
+                return
+
+            intensity, error = apply_corrections(hist, args, histogram_bins, runtime_state=runtime_state)
+            relative_uncertainty = compute_relative_uncertainty(intensity, error)
+            mean_relative_uncertainty, profile = statistics_window.summarize(relative_uncertainty)
+            if mean_relative_uncertainty == 0.0:
+                # Nothing populated in the window yet. Recording this would put a "zero error at
+                # zero charge" point at the head of the decay curve, which reads as perfect data
+                # rather than no data and is exactly backwards for anything fitting the series.
+                return
+
+            sample = StatisticsSample(
+                elapsed_seconds=accumulator.elapsed_seconds,
+                proton_charge_pc=accumulator.proton_charge_pc,
+                mean_relative_uncertainty=mean_relative_uncertainty,
+                total_counts=float(sum(intensity)),
+                nonzero_bins=sum(1 for value in intensity if value != 0.0),
+                histogram_events=histogram_event_count,
+                relative_uncertainty_profile=profile,
+            )
+            series.record(sample)
+            if args.statistics_output_csv is not None:
+                write_statistics_csv(series.samples(), args.statistics_output_csv)
+            if args.statistics_map_output_csv is not None:
+                write_statistics_map_csv(series.snapshot(), args.statistics_map_output_csv)
+
         def _publish_histogram_snapshot(histogram_event_count: int, hist: list[int]) -> None:
             nonlocal last_intersect_publish_at, next_snapshot_event_count
+            _record_statistics_sample(histogram_event_count, hist)
             if publisher is None or intersect_config is None:
                 pass
             else:
@@ -143,15 +196,23 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 interval = max(1, intersect_config.publish_interval_seconds)
                 if last_intersect_publish_at is None or (now - last_intersect_publish_at) >= interval:
                     last_intersect_publish_at = now
-                    q_values = bin_centre_q_values(args.histogram_q_min, args.histogram_q_bin_size, len(hist))
-                    errors = [math.sqrt(float(value)) for value in hist]
-                    payload = build_histogram_payload(q_values, [float(value) for value in hist], errors)
+                    # Corrected, not raw counts. The run-complete event publishes corrected
+                    # values, so publishing raw ones here would make a subscriber's series jump
+                    # by the whole correction factor at the end of the run -- a factor of ~1e12
+                    # once normalization by proton charge is applied.
+                    intensity, errors = apply_corrections(hist, args, histogram_bins, runtime_state=runtime_state)
+                    payload = build_histogram_payload(
+                        q_values,
+                        intensity,
+                        errors,
+                        runtime_state.run_statistics.series.latest(),
+                    )
                     LOGGER.info(
-                        "Publishing histogram_updated event: bins=%d first_q=%.3f last_q=%.3f total_counts=%.0f",
-                        len(hist),
+                        "Publishing histogram_updated event: bins=%d first_q=%.3f last_q=%.3f total_counts=%.6g",
+                        len(intensity),
                         q_values[0] if q_values else float("nan"),
                         q_values[-1] if q_values else float("nan"),
-                        float(sum(hist)),
+                        float(sum(intensity)),
                     )
                     publisher.publish_event(intersect_config.histogram_event_name, payload)
 
@@ -160,7 +221,9 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 and args.histogram_output_csv is not None
                 and histogram_event_count >= next_snapshot_event_count
             ):
-                snapshot_hist, snapshot_error = apply_corrections(hist, args, histogram_bins, runtime_state=runtime_state)
+                snapshot_hist, snapshot_error = apply_corrections(
+                    hist, args, histogram_bins, runtime_state=runtime_state
+                )
                 write_histogram_csv(
                     snapshot_hist,
                     snapshot_error,
@@ -183,6 +246,11 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 run_completion_handled,
             )
             final_hist, final_error = apply_corrections(hist, args, histogram_bins, runtime_state=runtime_state)
+            # Close the decay series on the totals this run actually reached, before the plot
+            # and the INTERSECT event below read it. Every histogrammed event increments exactly
+            # one bin, so the raw histogram sums to this run's accepted-event count -- the
+            # enclosing counters are still stale here when finalizing from the END_RUN callback.
+            _record_statistics_sample(int(sum(hist)), hist, force=True)
             maybe_update_live_plot(
                 plotter,
                 final_hist,
@@ -190,6 +258,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 args.live_plot_refresh_every,
                 1,
                 force=True,
+                statistics_series=runtime_state.run_statistics.series,
             )
             LOGGER.info(
                 "Forced live plot refresh with finalized histogram: bins=%s total_counts=%.0f",
@@ -197,10 +266,14 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 float(sum(final_hist)),
             )
             if publisher is not None and intersect_config is not None:
-                q_values = bin_centre_q_values(args.histogram_q_min, args.histogram_q_bin_size, len(final_hist))
                 publisher.publish_event(
                     intersect_config.histogram_event_name,
-                    build_histogram_payload(q_values, final_hist, final_error),
+                    build_histogram_payload(
+                        q_values,
+                        final_hist,
+                        final_error,
+                        runtime_state.run_statistics.series.latest(),
+                    ),
                 )
                 LOGGER.info(
                     "Publishing INTERSECT run-complete event '%s'",
@@ -251,6 +324,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                     run_complete_callback=_handle_run_complete,
                     histogram_state_callback=_set_active_hist,
                     hist=active_hist,
+                    run_statistics=runtime_state.run_statistics,
                 )
             except STREAM_DROP_ERRORS as exc:
                 if args.adara_stream is None:
@@ -274,17 +348,15 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 packet_count, total_events, histogram_events, hist = accumulation_result
                 adara_stats = None
             else:
-                raise ValueError(
-                    "accumulate_histogram() must return 4 or 5 values "
-                    f"(got {len(accumulation_result)})"
-                )
+                raise ValueError(f"accumulate_histogram() must return 4 or 5 values (got {len(accumulation_result)})")
 
             cumulative_packet_count += packet_count
             cumulative_total_events += total_events
             cumulative_histogram_events += histogram_events
 
             LOGGER.info(
-                "ADARA accumulate_histogram returned: packets=%s total_events=%s histogrammed_events=%s run_completion_handled=%s active_hist_is_set=%s active_hist_total=%.0f",
+                "ADARA accumulate_histogram returned: packets=%s total_events=%s histogrammed_events=%s "
+                "run_completion_handled=%s active_hist_is_set=%s active_hist_total=%.0f",
                 packet_count,
                 total_events,
                 histogram_events,
@@ -304,12 +376,12 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             max_reconnects = args.adara_stream_max_reconnects
             reconnect_attempts += 1
             if max_reconnects >= 0 and reconnect_attempts > max_reconnects:
-                raise OSError(
-                    "ADARA live stream ended before END_RUN and reconnect limit was reached"
-                )
+                raise OSError("ADARA live stream ended before END_RUN and reconnect limit was reached")
 
             LOGGER.warning(
-                "ADARA live stream disconnected before END_RUN after %s packets (%s total source events); reconnect attempt %s; cumulative packets=%s cumulative source events=%s cumulative histogrammed events=%s",
+                "ADARA live stream disconnected before END_RUN after %s packets (%s total source events); "
+                "reconnect attempt %s; cumulative packets=%s cumulative source events=%s "
+                "cumulative histogrammed events=%s",
                 packet_count,
                 total_events,
                 reconnect_attempts,
@@ -341,9 +413,7 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                     LOGGER.warning("Reconnect attempt %s failed: %s", reconnect_attempts, exc)
                     reconnect_attempts += 1
                     if max_reconnects >= 0 and reconnect_attempts > max_reconnects:
-                        raise OSError(
-                            "ADARA live stream ended before END_RUN and reconnect limit was reached"
-                        ) from exc
+                        raise OSError("ADARA live stream ended before END_RUN and reconnect limit was reached") from exc
                     time.sleep(reconnect_delay)
 
         active_hist = hist
@@ -369,8 +439,17 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             if not _write_histogram_output(corrected_hist, corrected_error, args):
                 return 1
             histogram_csv_written = True
+        if args.statistics_output_csv is not None:
+            LOGGER.info("Writing statistics CSV to %s", Path(args.statistics_output_csv).resolve())
+            write_statistics_csv(runtime_state.run_statistics.series.samples(), args.statistics_output_csv)
+        if args.statistics_map_output_csv is not None:
+            LOGGER.info("Writing statistics map CSV to %s", Path(args.statistics_map_output_csv).resolve())
+            write_statistics_map_csv(runtime_state.run_statistics.series.snapshot(), args.statistics_map_output_csv)
         if plotter is not None and _should_keep_live_plot_open(args):
-            LOGGER.info("Keeping browser live plot available at %s until interrupted", getattr(plotter, "url", "configured host/port"))
+            LOGGER.info(
+                "Keeping browser live plot available at %s until interrupted",
+                getattr(plotter, "url", "configured host/port"),
+            )
             plotter.wait_until_closed()
     except KeyboardInterrupt:
         print("Interrupted by user", file=sys.stderr)
@@ -391,6 +470,14 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
     print(f"Packets read         : {packet_count}")
     print(f"Total events         : {total_events}")
     print(f"Histogrammed events  : {histogram_events}")
+    if adara_stats is not None and adara_stats.rtdl_packets == 0 and adara_stats.packet_count > 0:
+        # Without RTDL packets the charge axis stays flat at zero, which silently makes the
+        # decay series unusable for anything plotted or forecast against charge.
+        LOGGER.warning(
+            "No ADARA RTDL packets seen in %s packets: proton charge is unavailable, so the "
+            "error-decay series has a time axis only and --normalize-by proton-charge is a no-op",
+            adara_stats.packet_count,
+        )
     if adara_stats is not None:
         print(f"Skipped non-banked   : {adara_stats.skipped_non_banked_packets}")
         print(f"Skipped bad pixel    : {adara_stats.skipped_invalid_pixel_ids}")

@@ -29,4 +29,3 @@ docker run --rm \
     --reduction-output-csv "/work/${OUTPUT_CSV}" \
     --q-min 0.0 \
     --q-max 60.0
-

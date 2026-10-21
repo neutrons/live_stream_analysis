@@ -3,8 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from intersect_sdk import get_schema_from_capability_implementations
-from intersect_sdk import HierarchyConfig
+from intersect_sdk import HierarchyConfig, get_schema_from_capability_implementations
 
 from live_stream_analysis.intersect import (
     IntersectConfig,
@@ -73,17 +72,13 @@ def test_load_intersect_config_requires_event_names(tmp_path: Path):
 
 
 def test_build_run_complete_payload_omits_unknown_ipts():
-    payload = build_run_complete_payload(
-        RunMetadata(instrument="nomad", ipts=None, run_number=243451)
-    )
+    payload = build_run_complete_payload(RunMetadata(instrument="nomad", ipts=None, run_number=243451))
 
     assert payload.model_dump(exclude_none=True) == {"instrument": "nomad", "run_number": 243451}
 
 
 def test_build_run_complete_payload_includes_known_ipts():
-    payload = build_run_complete_payload(
-        RunMetadata(instrument="nomad", ipts=12345, run_number=243451)
-    )
+    payload = build_run_complete_payload(RunMetadata(instrument="nomad", ipts=12345, run_number=243451))
 
     assert payload.model_dump(exclude_none=True) == {"instrument": "nomad", "ipts": 12345, "run_number": 243451}
 

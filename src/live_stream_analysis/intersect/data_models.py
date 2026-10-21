@@ -7,6 +7,11 @@ class HistogramEventPayload(BaseModel):
     q: list[float]
     intensity: list[float]
     error: list[float]
+    # Each event is also a point on the error-decay curve, so a subscriber can accumulate
+    # them and forecast how long the run needs to reach a target error in q-space.
+    elapsed_seconds: float | None = None
+    proton_charge_pc: float | None = None
+    mean_relative_uncertainty: float | None = None
 
 
 class RunCompleteEventPayload(BaseModel):

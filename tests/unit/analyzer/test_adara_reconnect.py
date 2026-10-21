@@ -74,8 +74,10 @@ def test_connection_reset_mid_stream_reconnects_instead_of_failing(tmp_path: Pat
             run_complete_callback=None,
             histogram_state_callback=None,
             hist=None,
+            run_statistics=None,
         ):
             _ = (reader, args, q_conversion, plotter, chunk_size, q_conversion_provider, histogram_callback)
+            _ = run_statistics
             self.calls += 1
             if hist is None:
                 hist = [0] * histogram_bins
@@ -137,9 +139,10 @@ def test_refused_reconnect_is_retried_rather_than_fatal(tmp_path: Path, monkeypa
             run_complete_callback=None,
             histogram_state_callback=None,
             hist=None,
+            run_statistics=None,
         ):
             _ = (reader, args, q_conversion, histogram_bins, plotter, chunk_size, q_conversion_provider)
-            _ = (histogram_callback, run_complete_callback, histogram_state_callback, hist)
+            _ = (histogram_callback, run_complete_callback, histogram_state_callback, hist, run_statistics)
             raise ConnectionResetError(104, "Connection reset by peer")
 
         def run_basic_mode(self, reader, *, chunk_size: int) -> int:

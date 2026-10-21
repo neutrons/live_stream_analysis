@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
 import h5py
@@ -11,8 +12,9 @@ from readadara import AdaraFileReader
 
 from live_stream_analysis.analyzer.factory import build_reader as _build_reader
 from live_stream_analysis.analyzer.histogram import load_correction_csv
-from live_stream_analysis.analyzer.live_plot import BrowserHistogramPlotter, compute_relative_uncertainty
+from live_stream_analysis.analyzer.live_plot import compute_relative_uncertainty
 from live_stream_analysis.main import build_parser, main
+from live_stream_analysis.statistics import STATISTICS_CSV_COLUMNS
 from tests.unit.analyzer.adara_fixtures import event_packet, null_packet, rtdl_packet
 
 
@@ -558,7 +560,7 @@ class TestAdaraFileCLI:
         updates: list[tuple[int, int]] = []
 
         class _StubPlotter:
-            def update(self, intensity, error, _relative_uncertainty):
+            def update(self, intensity, error, _relative_uncertainty, _statistics=None):
                 updates.append((len(intensity), int(round(max(error)))))
 
             def close(self):
@@ -588,6 +590,458 @@ class TestAdaraFileCLI:
         assert rc == 0
         assert updates
         assert updates[-1] == (-1, -1)
+
+    def test_histogram_mode_writes_the_error_decay_statistics_csv(self, tmp_path: Path):
+        """The decay series is what the downstream INTERSECT service fits to forecast run length."""
+        path = _write_adara(
+            tmp_path,
+            rtdl_packet(timestamp_s=100, charge_10pc=100),
+            event_packet([(1, 1)], timestamp_s=100),
+            rtdl_packet(timestamp_s=105, charge_10pc=300),
+            event_packet([(1, 1)], timestamp_s=105),
+        )
+        pixel_csv = tmp_path / "pixel_geometry.csv"
+        pixel_csv.write_text(
+            "\n".join(
+                [
+                    "pixel id,L2 value,theta value,TOF-to-Q matrix element",
+                    "0,1.0,1.0,0.0",
+                    "1,1.0,1.0,99.0",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        statistics_csv = tmp_path / "statistics.csv"
+
+        rc = main(
+            [
+                "analyze",
+                "--adara-file",
+                str(path),
+                "--histogram-pixel-geometry-csv",
+                str(pixel_csv),
+                "--histogram-q-max",
+                "100",
+                "--histogram-q-bin-size",
+                "0.02",
+                "--statistics-output-csv",
+                str(statistics_csv),
+                "--statistics-sample-interval-seconds",
+                "1.0",
+            ]
+        )
+
+        assert rc == 0
+        rows = list(csv.reader(statistics_csv.read_text(encoding="utf-8").splitlines()))
+        assert rows[0] == STATISTICS_CSV_COLUMNS
+        assert len(rows) > 1
+
+        elapsed = [float(row[0]) for row in rows[1:]]
+        charge = [float(row[1]) for row in rows[1:]]
+        assert elapsed == sorted(elapsed)
+        assert charge == sorted(charge)
+        # 100 + 300 units of 10 pC accumulated over a 5 second span.
+        assert elapsed[-1] == pytest.approx(5.0)
+        assert charge[-1] == pytest.approx(4000.0)
+
+    def test_histogram_mode_normalizes_the_output_csv_by_proton_charge(self, tmp_path: Path):
+        """Issue #37: counts divide by the integrated charge, and sigma divides by it too."""
+        path = _write_adara(
+            tmp_path,
+            rtdl_packet(timestamp_s=100, charge_10pc=400),
+            event_packet([(1, 1), (1, 1), (1, 1), (1, 1)], timestamp_s=100),
+        )
+        pixel_csv = tmp_path / "pixel_geometry.csv"
+        pixel_csv.write_text(
+            "pixel id,L2 value,theta value,TOF-to-Q matrix element\n0,1.0,1.0,0.0\n1,1.0,1.0,99.0\n",
+            encoding="utf-8",
+        )
+
+        def _run(normalize_by: str, output: Path) -> dict[float, tuple[float, float]]:
+            rc = main(
+                [
+                    "analyze",
+                    "--adara-file",
+                    str(path),
+                    "--histogram-pixel-geometry-csv",
+                    str(pixel_csv),
+                    "--histogram-q-max",
+                    "100",
+                    "--histogram-q-bin-size",
+                    "0.02",
+                    "--normalize-by",
+                    normalize_by,
+                    "--histogram-output-csv",
+                    str(output),
+                ]
+            )
+            assert rc == 0
+            rows = list(csv.DictReader(output.read_text(encoding="utf-8").splitlines()))
+            return {
+                float(row["Q value"]): (float(row["I(Q)"]), float(row["Error I(Q)"]))
+                for row in rows
+                if float(row["I(Q)"]) != 0.0
+            }
+
+        plain = _run("none", tmp_path / "plain.csv")
+        scaled = _run("proton-charge", tmp_path / "scaled.csv")
+
+        assert plain
+        # 400 units of 10 pC accumulated on the single pulse.
+        charge_pc = 4000.0
+        for q_value, (intensity, error) in plain.items():
+            scaled_intensity, scaled_error = scaled[q_value]
+            assert scaled_intensity == pytest.approx(intensity / charge_pc)
+            assert scaled_error == pytest.approx(error / charge_pc)
+
+    def test_histogram_mode_normalizes_by_proton_charge_without_being_asked(self, tmp_path: Path):
+        """Proton charge is the default normalization, so raw counts need an explicit opt-out."""
+        path = _write_adara(
+            tmp_path,
+            rtdl_packet(timestamp_s=100, charge_10pc=400),
+            event_packet([(1, 1), (1, 1), (1, 1), (1, 1)], timestamp_s=100),
+        )
+        pixel_csv = tmp_path / "pixel_geometry.csv"
+        pixel_csv.write_text(
+            "pixel id,L2 value,theta value,TOF-to-Q matrix element\n0,1.0,1.0,0.0\n1,1.0,1.0,99.0\n",
+            encoding="utf-8",
+        )
+        default_csv = tmp_path / "default.csv"
+        raw_csv = tmp_path / "raw.csv"
+
+        def _run(extra: list[str], output: Path) -> dict[float, float]:
+            base = [
+                "analyze",
+                "--adara-file",
+                str(path),
+                "--histogram-pixel-geometry-csv",
+                str(pixel_csv),
+                "--histogram-q-max",
+                "100",
+                "--histogram-q-bin-size",
+                "0.02",
+                "--histogram-output-csv",
+                str(output),
+            ]
+            assert main(base + extra) == 0
+            rows = list(csv.DictReader(output.read_text(encoding="utf-8").splitlines()))
+            return {float(r["Q value"]): float(r["I(Q)"]) for r in rows if float(r["I(Q)"]) != 0.0}
+
+        defaulted = _run([], default_csv)
+        raw = _run(["--normalize-by", "none"], raw_csv)
+
+        assert raw
+        assert defaulted != raw
+        for q_value, intensity in raw.items():
+            assert defaulted[q_value] == pytest.approx(intensity / 4000.0)
+
+    def test_histogram_mode_reports_raw_counts_when_the_source_has_no_charge(self, tmp_path: Path):
+        """The default must degrade to raw counts rather than dividing by a zero charge."""
+        path = _write_adara(tmp_path, event_packet([(1, 1), (1, 1)], timestamp_s=100))
+        pixel_csv = tmp_path / "pixel_geometry.csv"
+        pixel_csv.write_text(
+            "pixel id,L2 value,theta value,TOF-to-Q matrix element\n0,1.0,1.0,0.0\n1,1.0,1.0,99.0\n",
+            encoding="utf-8",
+        )
+        output = tmp_path / "histogram.csv"
+
+        assert (
+            main(
+                [
+                    "analyze",
+                    "--adara-file",
+                    str(path),
+                    "--histogram-pixel-geometry-csv",
+                    str(pixel_csv),
+                    "--histogram-q-max",
+                    "100",
+                    "--histogram-q-bin-size",
+                    "0.02",
+                    "--histogram-output-csv",
+                    str(output),
+                ]
+            )
+            == 0
+        )
+
+        rows = list(csv.DictReader(output.read_text(encoding="utf-8").splitlines()))
+        populated = [float(r["I(Q)"]) for r in rows if float(r["I(Q)"]) != 0.0]
+        assert populated == [pytest.approx(2.0)]
+
+    def test_statistics_series_closes_on_the_totals_the_run_actually_reached(self, tmp_path: Path):
+        """A run rarely ends on a sample boundary, so the last point must be forced.
+
+        Otherwise the fully-accumulated histogram is exported alongside a decay point from
+        slightly earlier, and a forecaster reading the pair sees them disagree.
+        """
+        path = _write_adara(
+            tmp_path,
+            rtdl_packet(timestamp_s=100, charge_10pc=100),
+            event_packet([(1, 1)], timestamp_s=100),
+            # This pulse lands well inside the 60 second sample interval, so only a forced
+            # final sample can capture it.
+            rtdl_packet(timestamp_s=105, charge_10pc=300),
+            event_packet([(1, 1)], timestamp_s=105),
+        )
+        pixel_csv = tmp_path / "pixel_geometry.csv"
+        pixel_csv.write_text(
+            "pixel id,L2 value,theta value,TOF-to-Q matrix element\n0,1.0,1.0,0.0\n1,1.0,1.0,99.0\n",
+            encoding="utf-8",
+        )
+        statistics_csv = tmp_path / "statistics.csv"
+
+        assert (
+            main(
+                [
+                    "analyze",
+                    "--adara-file",
+                    str(path),
+                    "--histogram-pixel-geometry-csv",
+                    str(pixel_csv),
+                    "--histogram-q-max",
+                    "100",
+                    "--histogram-q-bin-size",
+                    "0.02",
+                    "--statistics-output-csv",
+                    str(statistics_csv),
+                    "--statistics-sample-interval-seconds",
+                    "60",
+                ]
+            )
+            == 0
+        )
+
+        rows = list(csv.DictReader(statistics_csv.read_text(encoding="utf-8").splitlines()))
+        last = rows[-1]
+        assert float(last["Elapsed time (s)"]) == pytest.approx(5.0)
+        assert float(last["Proton charge (pC)"]) == pytest.approx(4000.0)
+        assert int(last["Histogrammed events"]) == 2
+
+    def test_histogram_mode_writes_the_2d_statistics_map_csv(self, tmp_path: Path):
+        """The 2D map is the q-space decay data the ticket asks to save out."""
+        path = _write_adara(
+            tmp_path,
+            rtdl_packet(timestamp_s=100, charge_10pc=100),
+            event_packet([(1, 1)], timestamp_s=100),
+            rtdl_packet(timestamp_s=105, charge_10pc=300),
+            event_packet([(1, 1)], timestamp_s=105),
+        )
+        pixel_csv = tmp_path / "pixel_geometry.csv"
+        pixel_csv.write_text(
+            "pixel id,L2 value,theta value,TOF-to-Q matrix element\n0,1.0,1.0,0.0\n1,1.0,1.0,99.0\n",
+            encoding="utf-8",
+        )
+        map_csv = tmp_path / "statistics_map.csv"
+
+        assert (
+            main(
+                [
+                    "analyze",
+                    "--adara-file",
+                    str(path),
+                    "--histogram-pixel-geometry-csv",
+                    str(pixel_csv),
+                    "--histogram-q-max",
+                    "100",
+                    "--histogram-q-bin-size",
+                    "0.02",
+                    "--statistics-map-output-csv",
+                    str(map_csv),
+                    "--statistics-q-min",
+                    "98.0",
+                    "--statistics-q-max",
+                    "100.0",
+                ]
+            )
+            == 0
+        )
+
+        rows = list(csv.reader(map_csv.read_text(encoding="utf-8").splitlines()))
+        assert rows[0][:2] == ["Elapsed time (s)", "Proton charge (pC)"]
+        # One column per Q bin inside the 98-100 window at 0.02 bins.
+        assert len(rows[0]) == 2 + 100
+        assert all(header.startswith("sigma/I(Q) at Q=") for header in rows[0][2:])
+        assert len(rows) > 1
+        # The run's populated bin sits at Q=99.01 and must carry a real value.
+        assert any(float(value) > 0.0 for value in rows[-1][2:])
+        assert float(rows[-1][1]) == pytest.approx(4000.0)
+
+    def test_streaming_and_final_intersect_events_are_on_the_same_scale(self, tmp_path: Path, monkeypatch):
+        """Periodic events must be corrected like the final one.
+
+        They used to publish raw counts while the run-complete event published corrected
+        values, so a subscriber plotting intensity saw it jump by the whole correction factor
+        at the end of the run -- ~1e12 once normalization by proton charge is on.
+        """
+        path = _write_adara(tmp_path, null_packet())
+        pixel_csv = tmp_path / "pixel_geometry.csv"
+        pixel_csv.write_text(
+            "pixel id,L2 value,theta value,TOF-to-Q matrix element\n0,1.0,1.0,0.0\n1,1.0,1.0,99.0\n",
+            encoding="utf-8",
+        )
+        config_path = tmp_path / "intersect.yaml"
+        config_path.write_text(
+            "\n".join(
+                [
+                    "service:",
+                    "  name: nomadanalysis",
+                    "  publish_interval_seconds: 1",
+                    "events:",
+                    "  histogram: histogram.updated",
+                    "  run_complete: run.completed",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        published: list[tuple[str, object]] = []
+
+        class _StubPublisher:
+            def publish_event(self, name, payload):
+                published.append((name, payload))
+
+            def close(self):
+                return
+
+        class _StubRunner:
+            def accumulate_histogram(
+                self,
+                reader,
+                args,
+                q_conversion,
+                histogram_bins,
+                plotter,
+                *,
+                chunk_size,
+                q_conversion_provider=None,
+                histogram_callback=None,
+                run_complete_callback=None,
+                histogram_state_callback=None,
+                hist=None,
+                run_statistics=None,
+            ):
+                _ = (reader, args, q_conversion, plotter, chunk_size, q_conversion_provider, run_complete_callback)
+                hist = [0] * histogram_bins
+                histogram_state_callback(hist)
+                hist[4950] = 400
+                # A pulse of charge, so normalization has something to divide by.
+                run_statistics.accumulator.observe_pulse(100.0, 4000.0)
+                histogram_callback(400, hist)
+                return 1, 400, 400, hist, None
+
+            def run_basic_mode(self, reader, *, chunk_size):
+                _ = (reader, chunk_size)
+                return 0
+
+        monkeypatch.setattr(
+            "live_stream_analysis.analyzer.histogram_runner.create_source_runner",
+            lambda _args: _StubRunner(),
+        )
+        monkeypatch.setattr(
+            "live_stream_analysis.analyzer.histogram_runner.create_event_publisher",
+            lambda _config, **_kwargs: _StubPublisher(),
+        )
+
+        assert (
+            main(
+                [
+                    "analyze",
+                    "--adara-file",
+                    str(path),
+                    "--histogram-pixel-geometry-csv",
+                    str(pixel_csv),
+                    "--histogram-q-max",
+                    "100",
+                    "--histogram-q-bin-size",
+                    "0.02",
+                    "--enable-intersect",
+                    "--intersect-config",
+                    str(config_path),
+                ]
+            )
+            == 0
+        )
+
+        histograms = [payload for name, payload in published if name == "histogram.updated"]
+        assert len(histograms) >= 2
+        peaks = [max(payload.intensity) for payload in histograms]
+        # 400 counts over 4000 pC. Every event agrees; none reports the raw 400.
+        assert peaks == [pytest.approx(0.1)] * len(peaks)
+
+    def test_decay_series_has_no_zero_error_point_before_any_data_arrives(self, tmp_path: Path):
+        """A leading (0 charge, 0 error) point reads as perfect data instead of no data.
+
+        Anything fitting the series to forecast a time-to-target would be pulled the wrong way
+        by a point claiming zero error was already achieved at zero accumulation.
+        """
+        path = _write_adara(
+            tmp_path,
+            # A banked packet whose only event cannot be converted to Q still triggers a
+            # statistics callback, with charge already accumulating and the histogram empty --
+            # exactly the state that produced a leading all-zero row against the live stream.
+            rtdl_packet(timestamp_s=100, charge_10pc=100),
+            event_packet([(0, 1)], timestamp_s=100),
+            rtdl_packet(timestamp_s=105, charge_10pc=300),
+            event_packet([(1, 1), (1, 1)], timestamp_s=105),
+        )
+        pixel_csv = tmp_path / "pixel_geometry.csv"
+        pixel_csv.write_text(
+            "pixel id,L2 value,theta value,TOF-to-Q matrix element\n0,1.0,1.0,0.0\n1,1.0,1.0,99.0\n",
+            encoding="utf-8",
+        )
+        statistics_csv = tmp_path / "statistics.csv"
+
+        assert (
+            main(
+                [
+                    "analyze",
+                    "--adara-file",
+                    str(path),
+                    "--histogram-pixel-geometry-csv",
+                    str(pixel_csv),
+                    "--histogram-q-max",
+                    "100",
+                    "--histogram-q-bin-size",
+                    "0.02",
+                    "--statistics-output-csv",
+                    str(statistics_csv),
+                    "--statistics-sample-interval-seconds",
+                    "0",
+                ]
+            )
+            == 0
+        )
+
+        rows = list(csv.DictReader(statistics_csv.read_text(encoding="utf-8").splitlines()))
+        assert rows
+        assert all(float(row["Mean sigma/I(Q)"]) > 0.0 for row in rows)
+        assert all(int(row["Nonzero bins"]) > 0 for row in rows)
+
+    def test_histogram_mode_rejects_an_inverted_statistics_q_window(self, tmp_path: Path, capsys):
+        path = _write_adara(tmp_path, event_packet([(1, 1)]))
+        pixel_csv = tmp_path / "pixel_geometry.csv"
+        pixel_csv.write_text(
+            "pixel id,L2 value,theta value,TOF-to-Q matrix element\n0,1.0,1.0,0.0\n1,1.0,1.0,99.0\n",
+            encoding="utf-8",
+        )
+
+        rc = main(
+            [
+                "analyze",
+                "--adara-file",
+                str(path),
+                "--histogram-pixel-geometry-csv",
+                str(pixel_csv),
+                "--statistics-q-min",
+                "5.0",
+                "--statistics-q-max",
+                "1.0",
+            ]
+        )
+
+        assert rc == 1
+        assert "--statistics-q-max must be > --statistics-q-min" in capsys.readouterr().err
 
     def test_histogram_mode_end_run_publishes_completion_and_resets_histogram(self, tmp_path: Path, monkeypatch):
         path = _write_adara(tmp_path, null_packet())
@@ -642,8 +1096,19 @@ class TestAdaraFileCLI:
                 run_complete_callback=None,
                 histogram_state_callback=None,
                 hist=None,
+                run_statistics=None,
             ):
-                _ = (reader, args, q_conversion, histogram_bins, plotter, chunk_size, q_conversion_provider, histogram_callback)
+                _ = (
+                    reader,
+                    args,
+                    q_conversion,
+                    histogram_bins,
+                    plotter,
+                    chunk_size,
+                    q_conversion_provider,
+                    histogram_callback,
+                    run_statistics,
+                )
                 hist = [0] * 5000
                 histogram_state_callback(hist)
                 hist[4950] = 2
@@ -657,7 +1122,7 @@ class TestAdaraFileCLI:
 
         monkeypatch.setattr(
             "live_stream_analysis.analyzer.histogram_runner.create_event_publisher",
-            lambda _config, runtime_state=None: _StubPublisher(),
+            lambda _config, **_kwargs: _StubPublisher(),
         )
         monkeypatch.setattr(
             "live_stream_analysis.analyzer.histogram_runner.create_source_runner",
@@ -706,7 +1171,7 @@ class TestAdaraFileCLI:
         updates: list[tuple[float, float]] = []
 
         class _StubPlotter:
-            def update(self, intensity, _error, relative_uncertainty):
+            def update(self, intensity, _error, relative_uncertainty, _statistics=None):
                 updates.append((max(intensity), max(relative_uncertainty)))
 
             def close(self):
@@ -778,7 +1243,7 @@ class TestAdaraFileCLI:
         relative_uncertainty_updates: list[float] = []
 
         class _StubPlotter:
-            def update(self, _intensity, _error, relative_uncertainty):
+            def update(self, _intensity, _error, relative_uncertainty, _statistics=None):
                 relative_uncertainty_updates.append(max(relative_uncertainty))
 
             def close(self):
@@ -829,11 +1294,13 @@ class TestAdaraFileCLI:
         created: list[tuple[str, int, bool]] = []
 
         class _StubBrowserPlotter:
-            def __init__(self, q_min: float, q_bin_size: float, histogram_bins: int, host: str, port: int, open_browser: bool):
+            def __init__(
+                self, q_min: float, q_bin_size: float, histogram_bins: int, host: str, port: int, open_browser: bool
+            ):
                 _ = (q_min, q_bin_size, histogram_bins)
                 created.append((host, port, open_browser))
 
-            def update(self, _intensity, _error, _relative_uncertainty):
+            def update(self, _intensity, _error, _relative_uncertainty, _statistics=None):
                 return
 
             def close(self):

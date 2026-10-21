@@ -6,7 +6,9 @@ from live_stream_analysis.intersect import client
 
 
 def test_print_event_callback_writes_json_payload(capsys):
-    result = client._print_event_callback("ornl.neutrons.nomad.analysis.livestreamanalysis", "nomadanalysis", "histogram_updated", {"q": [1.0]})
+    result = client._print_event_callback(
+        "ornl.neutrons.nomad.analysis.livestreamanalysis", "nomadanalysis", "histogram_updated", {"q": [1.0]}
+    )
 
     captured = capsys.readouterr()
     assert result is None

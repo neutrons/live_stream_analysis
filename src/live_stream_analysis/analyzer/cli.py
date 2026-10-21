@@ -145,11 +145,63 @@ def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         help="Optional three-column CSV with Q value, I(Q), Error I(Q) used to normalize the histogrammed signal.",
     )
     parser.add_argument(
+        "--normalize-by",
+        choices=("proton-charge", "time", "none"),
+        default="proton-charge",
+        help=(
+            "Normalize the histogrammed signal by integrated proton charge or accumulated run time "
+            "(default: proton-charge). Counts are reported unscaled until the chosen quantity starts "
+            "accumulating, and when the source reports neither. Use 'none' for raw counts."
+        ),
+    )
+    parser.add_argument(
+        "--statistics-output-csv",
+        metavar="FILE",
+        help=(
+            "Optional output CSV recording the decay of mean sigma/I(Q) against elapsed time and "
+            "proton charge, for downstream forecasting of time-to-target-error."
+        ),
+    )
+    parser.add_argument(
+        "--statistics-map-output-csv",
+        metavar="FILE",
+        help=(
+            "Optional output CSV with the 2D sigma/I(Q) map: one row per sample, one column per Q "
+            "in the statistics window, prefixed by elapsed time and proton charge."
+        ),
+    )
+    parser.add_argument(
+        "--statistics-q-min",
+        type=float,
+        help="Lower Q bound for the mean sigma/I(Q) statistic (default: all populated bins).",
+    )
+    parser.add_argument(
+        "--statistics-q-max",
+        type=float,
+        help="Upper Q bound for the mean sigma/I(Q) statistic (default: all populated bins).",
+    )
+    parser.add_argument(
+        "--statistics-sample-interval-seconds",
+        type=float,
+        default=1.0,
+        help="Minimum accumulated run time between error-decay samples (default: 1.0).",
+    )
+    parser.add_argument(
+        "--statistics-x-axis",
+        choices=("time", "proton-charge"),
+        default="proton-charge",
+        help=(
+            "Independent variable for the desktop error-decay panel (default: proton-charge). "
+            "The browser live plot can toggle between both without restarting."
+        ),
+    )
+    parser.add_argument(
         "--sample-coherent-scatter-length",
         type=float,
         help=(
             "Optional average coherent scattering length for the sample in fm. "
-            "When provided with --sample-total-scatter-length-squared, convert corrected intensity to Mantid-style S(Q)."
+            "When provided with --sample-total-scatter-length-squared, "
+            "convert corrected intensity to Mantid-style S(Q)."
         ),
     )
     parser.add_argument(

@@ -67,9 +67,7 @@ def compare(
         return 0
 
     abs_diffs = [abs(ref_i[k] - cand_i[k]) for k in populated]
-    rel_diffs = [
-        abs(ref_i[k] - cand_i[k]) / abs(ref_i[k]) if ref_i[k] != 0.0 else math.inf for k in populated
-    ]
+    rel_diffs = [abs(ref_i[k] - cand_i[k]) / abs(ref_i[k]) if ref_i[k] != 0.0 else math.inf for k in populated]
     finite_rel = [value for value in rel_diffs if math.isfinite(value)]
 
     total_ref = sum(ref_i)

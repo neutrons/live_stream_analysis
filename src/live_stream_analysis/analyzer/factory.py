@@ -26,6 +26,7 @@ class HistogramSourceRunner(Protocol):
         run_complete_callback=None,
         histogram_state_callback=None,
         hist=None,
+        run_statistics=None,
     ): ...
 
     def run_basic_mode(self, reader, *, chunk_size: int) -> int: ...
@@ -47,6 +48,7 @@ class _AdaraRunner:
         run_complete_callback=None,
         histogram_state_callback=None,
         hist=None,
+        run_statistics=None,
     ):
         _ = chunk_size
         return accumulate_adara_histogram(
@@ -64,6 +66,7 @@ class _AdaraRunner:
             run_complete_callback=run_complete_callback,
             histogram_state_callback=histogram_state_callback,
             hist=hist,
+            run_statistics=run_statistics,
         )
 
     def run_basic_mode(self, reader, *, chunk_size: int) -> int:
@@ -87,6 +90,7 @@ class _NexusRunner:
         run_complete_callback=None,
         histogram_state_callback=None,
         hist=None,
+        run_statistics=None,
     ):
         _ = histogram_state_callback
         packet_count, total_events, histogram_events, hist, adara_stats = accumulate_nexus_histogram(
@@ -103,6 +107,7 @@ class _NexusRunner:
             q_conversion_provider=q_conversion_provider,
             histogram_callback=histogram_callback,
             hist=hist,
+            run_statistics=run_statistics,
         )
         if run_complete_callback is not None:
             run_complete_callback(None)

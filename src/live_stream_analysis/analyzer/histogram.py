@@ -135,6 +135,16 @@ def bin_centre_q_values(q_min: float, q_bin_size: float, bins: int) -> list[floa
     return [q_min + (index + 0.5) * q_bin_size for index in range(bins)]
 
 
+def compute_relative_uncertainty(intensity: list[float], error: list[float]) -> list[float]:
+    relative_uncertainty: list[float] = []
+    for y_value, err_value in zip(intensity, error, strict=True):
+        if y_value == 0.0:
+            relative_uncertainty.append(0.0)
+            continue
+        relative_uncertainty.append(abs(err_value / y_value))
+    return relative_uncertainty
+
+
 def write_histogram_csv(
     intensity: list[float],
     error: list[float],
@@ -183,7 +193,7 @@ def load_correction_csv(
     return values, errors
 
 
-def apply_corrections(
+def apply_corrections(  # noqa: C901
     hist: list[int],
     args: argparse.Namespace,
     histogram_bins: int,
@@ -263,17 +273,38 @@ def apply_corrections(
             raise ValueError("--sample-coherent-scatter-length must be > 0")
 
         laue_monotonic_diffuse_scat = total_scatter_length_squared / coherent_length_squared
-        corrected = [
-            (value / coherent_length_squared) + (1.0 - laue_monotonic_diffuse_scat)
-            for value in corrected
-        ]
+        corrected = [(value / coherent_length_squared) + (1.0 - laue_monotonic_diffuse_scat) for value in corrected]
         variance = [value / (coherent_length_squared**2) for value in variance]
+
+    divisor = _accumulation_divisor(args, runtime_state)
+    if divisor is not None:
+        corrected = [value / divisor for value in corrected]
+        variance = [value / (divisor**2) for value in variance]
 
     error = [math.sqrt(max(value, 0.0)) for value in variance]
     return corrected, error
 
 
-def validate_histogram_args(args: argparse.Namespace) -> int:
+def _accumulation_divisor(args: argparse.Namespace, runtime_state) -> float | None:
+    """Return the accumulated time or charge to normalize by, or None to leave the scale alone.
+
+    Early in a run neither quantity has accumulated yet; dividing by zero there would blow up
+    the histogram, so the raw counts are reported until there is something to divide by.
+    """
+    normalize_by = getattr(args, "normalize_by", "none")
+    if normalize_by == "none" or runtime_state is None:
+        return None
+
+    run_statistics = getattr(runtime_state, "run_statistics", None)
+    if run_statistics is None:
+        return None
+    accumulator = run_statistics.accumulator
+
+    divisor = accumulator.elapsed_seconds if normalize_by == "time" else accumulator.proton_charge_pc
+    return divisor if divisor > 0.0 else None
+
+
+def validate_histogram_args(args: argparse.Namespace) -> int:  # noqa: C901
     if args.histogram_q_bin_size <= 0:
         raise ValueError("--histogram-q-bin-size must be > 0")
     if args.histogram_q_min < 0:
@@ -284,6 +315,19 @@ def validate_histogram_args(args: argparse.Namespace) -> int:
         raise ValueError("--tof-tick-us must be > 0")
     if args.live_plot_refresh_every <= 0:
         raise ValueError("--live-plot-refresh-every must be > 0")
+
+    statistics_q_min = getattr(args, "statistics_q_min", None)
+    statistics_q_max = getattr(args, "statistics_q_max", None)
+    if statistics_q_min is not None and statistics_q_max is not None and statistics_q_max <= statistics_q_min:
+        raise ValueError("--statistics-q-max must be > --statistics-q-min")
+    # A window entirely outside the histogram selects no bins, which would silently produce an
+    # empty decay series and a header-only CSV rather than reporting the mistake.
+    if statistics_q_min is not None and statistics_q_min >= args.histogram_q_max:
+        raise ValueError("--statistics-q-min must be < --histogram-q-max")
+    if statistics_q_max is not None and statistics_q_max <= args.histogram_q_min:
+        raise ValueError("--statistics-q-max must be > --histogram-q-min")
+    if getattr(args, "statistics_sample_interval_seconds", 1.0) < 0:
+        raise ValueError("--statistics-sample-interval-seconds must be >= 0")
 
     histogram_bins_f = (args.histogram_q_max - args.histogram_q_min) / args.histogram_q_bin_size
     histogram_bins = int(round(histogram_bins_f))

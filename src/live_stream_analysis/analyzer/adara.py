@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import logging
 import math
+from dataclasses import dataclass
 
 try:
     from readadara import AdaraFileReader, AdaraLiveStreamReader
-    from readadara.adara_reader import AdaraRunStatusPacket
+    from readadara.adara_reader import AdaraRTDLPacket, AdaraRunStatusPacket
 except ImportError:  # pragma: no cover
     AdaraFileReader = None
     AdaraLiveStreamReader = None
+    AdaraRTDLPacket = None
     AdaraRunStatusPacket = None
 
+from ..statistics import RunStatistics
 from .histogram import PixelQConversion, pixel_tof_to_q
 from .live_plot import HistogramPlotter, maybe_update_live_plot
 
@@ -30,9 +32,19 @@ def _safe_packet_attr(packet, attr: str):
     if callable(value):
         try:
             return value()
-        except Exception:
-            return '<error>'
-    return value if value is not None else '<missing>'
+        except Exception:  # noqa: BLE001 - diagnostic only; packet getters may raise anything
+            return "<error>"
+    return value if value is not None else "<missing>"
+
+
+def _packet_timestamp(packet) -> float | None:
+    getter = getattr(packet, "get_timestamp", None)
+    if getter is None:
+        return None
+    try:
+        return float(getter())
+    except Exception:  # noqa: BLE001 - a malformed timestamp is treated as absent
+        return None
 
 
 def _run_status(packet) -> int | None:
@@ -49,7 +61,7 @@ def _run_status(packet) -> int | None:
         return None
     try:
         return status_getter()
-    except Exception:
+    except Exception:  # noqa: BLE001 - a malformed status is treated as not a run boundary
         return None
 
 
@@ -64,6 +76,7 @@ class AdaraHistogramStats:
     skipped_masked_pixels: int = 0
     skipped_unconvertible_events: int = 0
     skipped_out_of_range_bins: int = 0
+    rtdl_packets: int = 0
 
 
 def build_reader(args: argparse.Namespace):
@@ -98,7 +111,7 @@ def build_reader(args: argparse.Namespace):
     )
 
 
-def accumulate_adara_histogram(
+def accumulate_adara_histogram(  # noqa: C901
     reader,
     q_conversion: PixelQConversion | None,
     histogram_bins: int,
@@ -113,6 +126,7 @@ def accumulate_adara_histogram(
     run_complete_callback=None,
     histogram_state_callback=None,
     hist: list[int] | None = None,
+    run_statistics: RunStatistics | None = None,
 ) -> tuple[int, int, int, list[int], AdaraHistogramStats]:
     stats = AdaraHistogramStats()
     if hist is None:
@@ -129,6 +143,12 @@ def accumulate_adara_histogram(
 
     for packet in reader.read_generator():
         stats.packet_count += 1
+        # Every packet carries a pulse timestamp, so the time axis advances even on a source
+        # with no RTDL packets. Charge is read from RTDL only, further down.
+        if run_statistics is not None:
+            timestamp = _packet_timestamp(packet)
+            if timestamp is not None:
+                run_statistics.accumulator.observe_time(timestamp)
         run_status = _run_status(packet)
 
         if run_status == ADARA_RUN_STATUS_NEW_RUN:
@@ -144,6 +164,8 @@ def accumulate_adara_histogram(
                     discarded,
                 )
             hist[:] = [0] * len(hist)
+            if run_statistics is not None:
+                run_statistics.reset()
             maybe_update_live_plot(
                 plotter,
                 hist,
@@ -151,6 +173,7 @@ def accumulate_adara_histogram(
                 live_plot_refresh_every,
                 stats.packet_count,
                 force=True,
+                statistics_series=run_statistics.series if run_statistics is not None else None,
             )
             if histogram_callback is not None:
                 histogram_callback(0, hist)
@@ -164,21 +187,30 @@ def accumulate_adara_histogram(
                 live_plot_refresh_every,
                 stats.packet_count,
                 force=True,
+                statistics_series=run_statistics.series if run_statistics is not None else None,
             )
             if histogram_callback is not None:
                 histogram_callback(stats.histogram_events, hist)
             LOGGER.info(
-                "Received ADARA END_RUN status packet after %s packets (%s total source events): packet_type=%s status=%s run_number=%s run_start=%s file_number=%s",
+                "Received ADARA END_RUN status packet after %s packets (%s total source events): "
+                "packet_type=%s status=%s run_number=%s run_start=%s file_number=%s",
                 stats.packet_count,
                 stats.total_events,
                 type(packet).__name__,
-                _safe_packet_attr(packet, 'get_status'),
-                _safe_packet_attr(packet, 'get_run_number'),
-                _safe_packet_attr(packet, 'get_run_start'),
-                _safe_packet_attr(packet, 'get_file_number'),
+                _safe_packet_attr(packet, "get_status"),
+                _safe_packet_attr(packet, "get_run_number"),
+                _safe_packet_attr(packet, "get_run_start"),
+                _safe_packet_attr(packet, "get_file_number"),
             )
             run_complete_callback(packet)
             return stats.packet_count, stats.total_events, stats.histogram_events, hist, stats
+
+        # RTDL packets carry the accelerator's per-pulse proton charge, which is what the
+        # error-decay statistics are plotted against. They are not banked event packets, so
+        # this has to happen before the skip below or the charge is thrown away.
+        if run_statistics is not None and AdaraRTDLPacket is not None and isinstance(packet, AdaraRTDLPacket):
+            run_statistics.accumulator.observe_charge(float(packet.get_charge()))
+            stats.rtdl_packets += 1
 
         if getattr(packet, "get_format_int", None) is not None:
             if packet.get_format_int() != ADARA_BANKED_EVENT_FORMAT:
@@ -189,7 +221,6 @@ def accumulate_adara_histogram(
         stats.total_events += len(events)
 
         for tof, pixel_id in events:
-
             active_q_conversion = q_conversion_provider() if q_conversion_provider is not None else q_conversion
             if active_q_conversion is None:
                 continue
@@ -233,6 +264,7 @@ def accumulate_adara_histogram(
             [math.sqrt(float(value)) for value in hist],
             live_plot_refresh_every,
             stats.packet_count,
+            statistics_series=run_statistics.series if run_statistics is not None else None,
         )
         if histogram_callback is not None:
             histogram_callback(stats.histogram_events, hist)

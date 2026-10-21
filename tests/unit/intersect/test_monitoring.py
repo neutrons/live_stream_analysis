@@ -8,6 +8,7 @@ from live_stream_analysis.intersect.events import (
     build_run_complete_payload,
     infer_run_metadata,
 )
+from live_stream_analysis.statistics import StatisticsSample
 
 
 def test_build_histogram_payload_returns_typed_schema_shape():
@@ -17,7 +18,27 @@ def test_build_histogram_payload_returns_typed_schema_shape():
         "q": [0.1, 0.2],
         "intensity": [10.0, 20.0],
         "error": [1.0, 2.0],
+        "elapsed_seconds": None,
+        "proton_charge_pc": None,
+        "mean_relative_uncertainty": None,
     }
+
+
+def test_build_histogram_payload_carries_the_error_decay_point_when_sampled():
+    """Each histogram event doubles as a point on the decay curve for downstream forecasting."""
+    sample = StatisticsSample(
+        elapsed_seconds=12.5,
+        proton_charge_pc=2.5e11,
+        mean_relative_uncertainty=0.042,
+        total_counts=30.0,
+        nonzero_bins=2,
+        histogram_events=30,
+    )
+    payload = build_histogram_payload([0.1, 0.2], [10.0, 20.0], [1.0, 2.0], sample)
+
+    assert payload.elapsed_seconds == 12.5
+    assert payload.proton_charge_pc == 2.5e11
+    assert payload.mean_relative_uncertainty == 0.042
 
 
 def test_build_run_complete_payload_omits_none_fields():
