@@ -39,4 +39,4 @@ dependencies:
   # if packages are not available on conda, list them here
   - pip
   - pip:
-    - pytest-playwright
+      - pytest-playwright

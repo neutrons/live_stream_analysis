@@ -75,7 +75,7 @@ def _configure_logging(args: argparse.Namespace) -> None:
     )
 
 
-def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
+def _run_histogram_mode(reader, args: argparse.Namespace) -> int:  # noqa: C901
     plotter: HistogramPlotter | None = None
     publisher = None
     corrected_hist: list[float] = []
@@ -355,7 +355,8 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             cumulative_histogram_events += histogram_events
 
             LOGGER.info(
-                "ADARA accumulate_histogram returned: packets=%s total_events=%s histogrammed_events=%s run_completion_handled=%s active_hist_is_set=%s active_hist_total=%.0f",
+                "ADARA accumulate_histogram returned: packets=%s total_events=%s histogrammed_events=%s "
+                "run_completion_handled=%s active_hist_is_set=%s active_hist_total=%.0f",
                 packet_count,
                 total_events,
                 histogram_events,
@@ -378,7 +379,9 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
                 raise OSError("ADARA live stream ended before END_RUN and reconnect limit was reached")
 
             LOGGER.warning(
-                "ADARA live stream disconnected before END_RUN after %s packets (%s total source events); reconnect attempt %s; cumulative packets=%s cumulative source events=%s cumulative histogrammed events=%s",
+                "ADARA live stream disconnected before END_RUN after %s packets (%s total source events); "
+                "reconnect attempt %s; cumulative packets=%s cumulative source events=%s "
+                "cumulative histogrammed events=%s",
                 packet_count,
                 total_events,
                 reconnect_attempts,

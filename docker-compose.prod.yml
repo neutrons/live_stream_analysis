@@ -35,14 +35,14 @@ services:
       - "0.0"
       - --histogram-q-max
       - "30"
-      #- --tof-tick-us
-      #- "1.0"
+      # - --tof-tick-us
+      # - "1.0"
       - --histogram-output-csv
       - analyze_histogram_stream.csv
-      #- --background-subtraction
-      #- /work/input_files/background.csv
-      #- --normalization
-      #- /work/input_files/normalization.csv
+      # - --background-subtraction
+      # - /work/input_files/background.csv
+      # - --normalization
+      # - /work/input_files/normalization.csv
       - --histogram-output-csv
       - analyze_histogram.csv
       - --live-plot-mode
@@ -62,4 +62,3 @@ services:
       - --enable-intersect
       - --intersect-config
       - /work/configs/intersect.example.yaml
-      

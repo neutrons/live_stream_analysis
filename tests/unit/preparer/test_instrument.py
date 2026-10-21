@@ -8,7 +8,6 @@ from live_stream_analysis.preparer.instrument import (
     build_detector_geometry,
 )
 
-
 TESTS_ROOT = Path(__file__).parents[2]
 
 

@@ -921,7 +921,7 @@ class TestAdaraFileCLI:
                 hist=None,
                 run_statistics=None,
             ):
-                _ = (reader, args, q_conversion, plotter, chunk_size, q_conversion_provider)
+                _ = (reader, args, q_conversion, plotter, chunk_size, q_conversion_provider, run_complete_callback)
                 hist = [0] * histogram_bins
                 histogram_state_callback(hist)
                 hist[4950] = 400
@@ -931,6 +931,7 @@ class TestAdaraFileCLI:
                 return 1, 400, 400, hist, None
 
             def run_basic_mode(self, reader, *, chunk_size):
+                _ = (reader, chunk_size)
                 return 0
 
         monkeypatch.setattr(
@@ -939,7 +940,7 @@ class TestAdaraFileCLI:
         )
         monkeypatch.setattr(
             "live_stream_analysis.analyzer.histogram_runner.create_event_publisher",
-            lambda _config, runtime_state=None: _StubPublisher(),
+            lambda _config, **_kwargs: _StubPublisher(),
         )
 
         assert (
@@ -1106,6 +1107,7 @@ class TestAdaraFileCLI:
                     chunk_size,
                     q_conversion_provider,
                     histogram_callback,
+                    run_statistics,
                 )
                 hist = [0] * 5000
                 histogram_state_callback(hist)
@@ -1120,7 +1122,7 @@ class TestAdaraFileCLI:
 
         monkeypatch.setattr(
             "live_stream_analysis.analyzer.histogram_runner.create_event_publisher",
-            lambda _config, runtime_state=None: _StubPublisher(),
+            lambda _config, **_kwargs: _StubPublisher(),
         )
         monkeypatch.setattr(
             "live_stream_analysis.analyzer.histogram_runner.create_source_runner",

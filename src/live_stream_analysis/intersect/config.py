@@ -1,10 +1,16 @@
 from __future__ import annotations
 
-from pathlib import Path
 import re
+from pathlib import Path
 
-from intersect_sdk import HierarchyConfig, IntersectClientCallback, IntersectClientConfig, IntersectEventMessageParams, IntersectServiceConfig
 import yaml
+from intersect_sdk import (
+    HierarchyConfig,
+    IntersectClientCallback,
+    IntersectClientConfig,
+    IntersectEventMessageParams,
+    IntersectServiceConfig,
+)
 
 from .data_models import IntersectConfig
 

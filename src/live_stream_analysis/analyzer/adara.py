@@ -32,7 +32,7 @@ def _safe_packet_attr(packet, attr: str):
     if callable(value):
         try:
             return value()
-        except Exception:
+        except Exception:  # noqa: BLE001 - diagnostic only; packet getters may raise anything
             return "<error>"
     return value if value is not None else "<missing>"
 
@@ -43,7 +43,7 @@ def _packet_timestamp(packet) -> float | None:
         return None
     try:
         return float(getter())
-    except Exception:
+    except Exception:  # noqa: BLE001 - a malformed timestamp is treated as absent
         return None
 
 
@@ -61,7 +61,7 @@ def _run_status(packet) -> int | None:
         return None
     try:
         return status_getter()
-    except Exception:
+    except Exception:  # noqa: BLE001 - a malformed status is treated as not a run boundary
         return None
 
 
@@ -111,7 +111,7 @@ def build_reader(args: argparse.Namespace):
     )
 
 
-def accumulate_adara_histogram(
+def accumulate_adara_histogram(  # noqa: C901
     reader,
     q_conversion: PixelQConversion | None,
     histogram_bins: int,
@@ -192,7 +192,8 @@ def accumulate_adara_histogram(
             if histogram_callback is not None:
                 histogram_callback(stats.histogram_events, hist)
             LOGGER.info(
-                "Received ADARA END_RUN status packet after %s packets (%s total source events): packet_type=%s status=%s run_number=%s run_start=%s file_number=%s",
+                "Received ADARA END_RUN status packet after %s packets (%s total source events): "
+                "packet_type=%s status=%s run_number=%s run_start=%s file_number=%s",
                 stats.packet_count,
                 stats.total_events,
                 type(packet).__name__,

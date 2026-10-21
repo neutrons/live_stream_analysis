@@ -193,7 +193,7 @@ def load_correction_csv(
     return values, errors
 
 
-def apply_corrections(
+def apply_corrections(  # noqa: C901
     hist: list[int],
     args: argparse.Namespace,
     histogram_bins: int,
@@ -304,7 +304,7 @@ def _accumulation_divisor(args: argparse.Namespace, runtime_state) -> float | No
     return divisor if divisor > 0.0 else None
 
 
-def validate_histogram_args(args: argparse.Namespace) -> int:
+def validate_histogram_args(args: argparse.Namespace) -> int:  # noqa: C901
     if args.histogram_q_bin_size <= 0:
         raise ValueError("--histogram-q-bin-size must be > 0")
     if args.histogram_q_min < 0:

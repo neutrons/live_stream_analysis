@@ -105,7 +105,7 @@ def iter_nexus_event_chunks(group: h5py.Group, chunk_size: int):
         yield event_ids[start:stop], event_tof[start:stop]
 
 
-def accumulate_nexus_histogram(
+def accumulate_nexus_histogram(  # noqa: C901
     nexus_files: list[str],
     q_conversion: PixelQConversion | None,
     histogram_bins: int,
