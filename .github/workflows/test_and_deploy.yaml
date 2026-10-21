@@ -12,6 +12,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    name: Lint and complexity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      # Runs the same hooks as local commits, including ruff's C901 cyclomatic complexity gate.
+      - name: Run pre-commit hooks
+        run: uv run pre-commit run --all-files --show-diff-on-failure
+
+      # Lists every function over the complexity limit, including ones hidden by `# noqa: C901`.
+      - name: Report suppressed complexity
+        run: uv run ruff check --select C901 --ignore-noqa --exit-zero --output-format concise .
+
   unit-tests:
     name: Unit tests
     runs-on: ubuntu-latest
