@@ -10,20 +10,35 @@ import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Protocol
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import matplotlib
 import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib import colors
 from matplotlib.collections import LineCollection
+from matplotlib.widgets import Button
 
-from .histogram import bin_centre_q_values
-
+from ..statistics import StatisticsSnapshot
+from .histogram import bin_centre_q_values, compute_relative_uncertainty
 
 logger = logging.getLogger(__name__)
 
 
+STATISTICS_X_AXIS_LABELS = {
+    "time": "Elapsed time (s)",
+    "proton-charge": "Proton charge (pC)",
+}
+
+
 class HistogramPlotter(Protocol):
-    def update(self, intensity: list[float], error: list[float], relative_uncertainty: list[float]) -> None: ...
+    def update(
+        self,
+        intensity: list[float],
+        error: list[float],
+        relative_uncertainty: list[float],
+        statistics: StatisticsSnapshot | None = None,
+    ) -> None: ...
 
     def wait_until_closed(self) -> None: ...
 
@@ -33,17 +48,23 @@ class HistogramPlotter(Protocol):
 class _BrowserPlotState:
     def __init__(self, q_values: list[float]):
         self._lock = threading.Lock()
+        self._statistics = StatisticsSnapshot([], [], [])
+        self._map_version = 0
+        self._map_cache: dict[str, tuple[int, dict[str, object]]] = {}
         self._payload = {
             "q_values": q_values,
             "intensity": [0.0] * len(q_values),
             "error": [0.0] * len(q_values),
             "relative_uncertainty": [0.0] * len(q_values),
+            "statistics": StatisticsSnapshot([], [], []).as_payload(),
             "status": {
                 "update_count": 0,
                 "nonzero_bins": 0,
                 "total_counts": 0.0,
                 "max_intensity": 0.0,
                 "mean_relative_uncertainty": 0.0,
+                "elapsed_seconds": 0.0,
+                "proton_charge_pc": 0.0,
             },
             "closed": False,
         }
@@ -52,7 +73,32 @@ class _BrowserPlotState:
         with self._lock:
             return dict(self._payload)
 
-    def update(self, intensity: list[float], error: list[float], relative_uncertainty: list[float]) -> None:
+    def statistics_map(self, axis: str) -> dict[str, object]:
+        """Build the 2D map on demand, cached until the next update.
+
+        The map is an order of magnitude larger than the rest of the state, and the page only
+        needs it while the 2D view is selected, so it is served from its own endpoint instead
+        of riding along on every poll.
+        """
+        with self._lock:
+            snapshot = self._statistics
+            cached = self._map_cache.get(axis)
+            version = self._map_version
+        if cached is not None and cached[0] == version:
+            return cached[1]
+
+        payload = snapshot.build_map(axis).as_payload()
+        with self._lock:
+            self._map_cache[axis] = (version, payload)
+        return payload
+
+    def update(
+        self,
+        intensity: list[float],
+        error: list[float],
+        relative_uncertainty: list[float],
+        statistics: StatisticsSnapshot | None = None,
+    ) -> None:
         nonzero_bins = sum(1 for value in intensity if value != 0.0)
         total_counts = float(sum(intensity))
         max_intensity = max(intensity, default=0.0)
@@ -63,17 +109,28 @@ class _BrowserPlotState:
             else 0.0
         )
         with self._lock:
+            if statistics is not None:
+                self._statistics = statistics
+                self._map_version += 1
+            statistics_payload = statistics.as_payload() if statistics is not None else self._payload["statistics"]
             self._payload = {
                 "q_values": self._payload["q_values"],
                 "intensity": intensity,
                 "error": error,
                 "relative_uncertainty": relative_uncertainty,
+                "statistics": statistics_payload,
                 "status": {
                     "update_count": int(self._payload["status"]["update_count"]) + 1,
                     "nonzero_bins": nonzero_bins,
                     "total_counts": total_counts,
                     "max_intensity": max_intensity,
                     "mean_relative_uncertainty": mean_relative_uncertainty,
+                    "elapsed_seconds": statistics_payload["elapsed_seconds"][-1]
+                    if statistics_payload["elapsed_seconds"]
+                    else 0.0,
+                    "proton_charge_pc": statistics_payload["proton_charge_pc"][-1]
+                    if statistics_payload["proton_charge_pc"]
+                    else 0.0,
                 },
                 "closed": False,
             }
@@ -107,6 +164,15 @@ class _BrowserPlotRequestHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/state":
             body = json.dumps(self.server.state.snapshot()).encode("utf-8")
+            self._write_response(body, "application/json")
+            return
+
+        if parsed.path == "/statistics-map":
+            axis = parse_qs(parsed.query).get("axis", ["proton-charge"])[0]
+            if axis not in STATISTICS_X_AXIS_LABELS:
+                self.send_error(HTTPStatus.BAD_REQUEST, "axis must be time or proton-charge")
+                return
+            body = json.dumps(self.server.state.statistics_map(axis)).encode("utf-8")
             self._write_response(body, "application/json")
             return
 
@@ -145,8 +211,14 @@ class BrowserHistogramPlotter:
         if open_browser:
             webbrowser.open(self.url)
 
-    def update(self, intensity: list[float], error: list[float], relative_uncertainty: list[float]) -> None:
-        self._state.update(intensity, error, relative_uncertainty)
+    def update(
+        self,
+        intensity: list[float],
+        error: list[float],
+        relative_uncertainty: list[float],
+        statistics: StatisticsSnapshot | None = None,
+    ) -> None:
+        self._state.update(intensity, error, relative_uncertainty, statistics)
 
     def wait_until_closed(self) -> None:
         self._thread.join()
@@ -158,10 +230,37 @@ class BrowserHistogramPlotter:
         self._thread.join(timeout=1.0)
 
 
+def _cell_edges(centres: list[float]) -> np.ndarray:
+    """Cell boundaries for pcolormesh from bin centres.
+
+    Samples land wherever the run happened to reach them rather than on a uniform grid, so
+    edges are midpoints between neighbours instead of a fixed step.
+    """
+    if not centres:
+        return np.array([0.0, 1.0])
+    values = np.asarray(centres, dtype=float)
+    if values.size == 1:
+        return np.array([values[0] - 0.5, values[0] + 0.5])
+    midpoints = (values[:-1] + values[1:]) / 2.0
+    return np.concatenate(
+        ([values[0] - (midpoints[0] - values[0])], midpoints, [values[-1] + (values[-1] - midpoints[-1])])
+    )
+
+
 class LiveHistogramPlotter:
-    def __init__(self, q_min: float, q_bin_size: float, histogram_bins: int):
+    def __init__(
+        self,
+        q_min: float,
+        q_bin_size: float,
+        histogram_bins: int,
+        statistics_x_axis: str = "proton-charge",
+    ):
         plt.ion()
-        self._figure, (self._axis, self._relative_axis) = plt.subplots(2, 1, figsize=(12, 9), sharex=True)
+        # The statistics panel is plotted against time or charge, not Q, so it must not
+        # share the x axis with the two Q panels. Only the first two are linked.
+        self._figure, (self._axis, self._relative_axis, self._statistics_axis) = plt.subplots(3, 1, figsize=(12, 12))
+        self._relative_axis.sharex(self._axis)
+        self._statistics_x_axis = statistics_x_axis
         self._q_values = bin_centre_q_values(q_min, q_bin_size, histogram_bins)
         zeros = [0.0] * histogram_bins
         (self._line,) = self._axis.plot(self._q_values, zeros, color="tab:blue", linewidth=1.5, label="I(Q)")
@@ -190,12 +289,130 @@ class LiveHistogramPlotter:
         self._relative_axis.set_title("Live Relative Uncertainty")
         self._relative_axis.grid(True, alpha=0.3)
         self._relative_axis.legend(loc="best")
-        self._figure.tight_layout()
+        (self._statistics_line,) = self._statistics_axis.plot(
+            [],
+            [],
+            color="tab:green",
+            linewidth=1.5,
+            marker="o",
+            markersize=3,
+            label="mean sigma / I(Q)",
+        )
+        self._statistics_axis.set_xlabel(STATISTICS_X_AXIS_LABELS[statistics_x_axis])
+        self._statistics_axis.set_ylabel("mean sigma / I(Q)")
+        self._statistics_axis.set_title("Error Decay")
+        self._statistics_axis.grid(True, alpha=0.3)
+        self._statistics_axis.legend(loc="best")
+        self._figure.tight_layout(rect=(0.0, 0.0, 1.0, 0.97))
+
+        # 1D collapses the Q window to its mean; 2D keeps every Q column so you can see which
+        # part of q-space is still noisy. Same series either way -- these only swap the view.
+        self._statistics_view = "1d"
+        self._statistics_log_colors = True
+        self._statistics_mesh = None
+        self._statistics_colorbar = None
+        self._latest_statistics: StatisticsSnapshot | None = None
+        self._view_button = Button(self._figure.add_axes((0.80, 0.975, 0.09, 0.02)), "2D map")
+        self._view_button.on_clicked(self._toggle_statistics_view)
+        self._scale_button = Button(self._figure.add_axes((0.90, 0.975, 0.09, 0.02)), "Linear")
+        self._scale_button.on_clicked(self._toggle_statistics_colors)
+
         self._figure.canvas.draw_idle()
         self._figure.canvas.flush_events()
         plt.show(block=False)
 
-    def update(self, intensity: list[float], error: list[float], relative_uncertainty: list[float]) -> None:
+    def _toggle_statistics_view(self, _event) -> None:
+        self._statistics_view = "2d" if self._statistics_view == "1d" else "1d"
+        self._view_button.label.set_text("1D trend" if self._statistics_view == "2d" else "2D map")
+        self._render_statistics()
+        self._figure.canvas.draw_idle()
+
+    def _toggle_statistics_colors(self, _event) -> None:
+        self._statistics_log_colors = not self._statistics_log_colors
+        self._scale_button.label.set_text("Linear" if self._statistics_log_colors else "Log")
+        if self._statistics_view == "2d":
+            self._render_statistics()
+            self._figure.canvas.draw_idle()
+
+    def _clear_statistics_mesh(self) -> None:
+        if self._statistics_colorbar is not None:
+            self._statistics_colorbar.remove()
+            self._statistics_colorbar = None
+        if self._statistics_mesh is not None:
+            self._statistics_mesh.remove()
+            self._statistics_mesh = None
+
+    def _render_statistics(self) -> None:
+        statistics = self._latest_statistics
+        if statistics is None:
+            return
+
+        if self._statistics_view == "1d":
+            self._clear_statistics_mesh()
+            self._statistics_line.set_visible(True)
+            self._statistics_axis.grid(True, alpha=0.3)
+            x_values = statistics.elapsed_seconds if self._statistics_x_axis == "time" else statistics.proton_charge_pc
+            self._statistics_line.set_data(x_values, statistics.mean_relative_uncertainty)
+            self._statistics_axis.set_xlabel(STATISTICS_X_AXIS_LABELS[self._statistics_x_axis])
+            self._statistics_axis.set_ylabel("mean sigma / I(Q)")
+            self._statistics_axis.set_title("Error Decay")
+            self._statistics_axis.set_autoscale_on(True)
+            self._statistics_axis.legend(loc="best")
+            self._statistics_axis.relim()
+            self._statistics_axis.autoscale_view()
+            return
+
+        self._statistics_line.set_visible(False)
+        statistics_map = statistics.build_map(self._statistics_x_axis)
+        self._clear_statistics_mesh()
+        if not statistics_map.values or not statistics_map.q_values:
+            return
+
+        values = np.array(
+            [[np.nan if value is None else value for value in row] for row in statistics_map.values],
+            dtype=float,
+        )
+        masked = np.ma.masked_invalid(values)
+        if masked.count() == 0:
+            return
+        norm = (
+            colors.LogNorm(vmin=masked.min(), vmax=masked.max())
+            if self._statistics_log_colors
+            else colors.Normalize(vmin=masked.min(), vmax=masked.max())
+        )
+        q_edges = _cell_edges(statistics_map.q_values)
+        axis_edges = _cell_edges(statistics_map.axis_values)
+        self._statistics_mesh = self._statistics_axis.pcolormesh(
+            q_edges,
+            axis_edges,
+            masked,
+            cmap="viridis",
+            norm=norm,
+            shading="flat",
+            rasterized=True,
+        )
+        self._statistics_colorbar = self._figure.colorbar(
+            self._statistics_mesh, ax=self._statistics_axis, label="sigma / I(Q)"
+        )
+        self._statistics_axis.set_xlabel("Q")
+        self._statistics_axis.set_ylabel(STATISTICS_X_AXIS_LABELS[self._statistics_x_axis])
+        self._statistics_axis.set_title("Error Decay Map")
+        self._statistics_axis.grid(False)
+        if self._statistics_axis.legend_ is not None:
+            self._statistics_axis.legend_.set_visible(False)
+        # relim() walks lines and patches but not collections, so autoscaling here would keep
+        # the 1D line's limits and leave the mesh off-screen entirely.
+        self._statistics_axis.set_autoscale_on(False)
+        self._statistics_axis.set_xlim(q_edges[0], q_edges[-1])
+        self._statistics_axis.set_ylim(axis_edges[0], axis_edges[-1])
+
+    def update(
+        self,
+        intensity: list[float],
+        error: list[float],
+        relative_uncertainty: list[float],
+        statistics: StatisticsSnapshot | None = None,
+    ) -> None:
         self._line.set_ydata(intensity)
         lower = [y_value - err_value for y_value, err_value in zip(intensity, error, strict=True)]
         upper = [y_value + err_value for y_value, err_value in zip(intensity, error, strict=True)]
@@ -216,6 +433,9 @@ class LiveHistogramPlotter:
         self._relative_line.set_ydata(relative_uncertainty)
         self._relative_axis.relim()
         self._relative_axis.autoscale_view()
+        if statistics is not None:
+            self._latest_statistics = statistics
+            self._render_statistics()
         self._figure.canvas.draw_idle()
         self._figure.canvas.flush_events()
         plt.pause(0.001)
@@ -228,7 +448,13 @@ class LiveHistogramPlotter:
 
 
 class NullHistogramPlotter:
-    def update(self, _intensity: list[float], _error: list[float], _relative_uncertainty: list[float]) -> None:
+    def update(
+        self,
+        _intensity: list[float],
+        _error: list[float],
+        _relative_uncertainty: list[float],
+        _statistics: StatisticsSnapshot | None = None,
+    ) -> None:
         return
 
     def wait_until_closed(self) -> None:
@@ -258,17 +484,12 @@ def create_live_histogram_plotter(args: argparse.Namespace, histogram_bins: int)
         print("Matplotlib is using a non-interactive backend; disabling live plot.", file=sys.stderr)
         return NullHistogramPlotter()
 
-    return LiveHistogramPlotter(args.histogram_q_min, args.histogram_q_bin_size, histogram_bins)
-
-
-def compute_relative_uncertainty(intensity: list[float], error: list[float]) -> list[float]:
-    relative_uncertainty: list[float] = []
-    for y_value, err_value in zip(intensity, error, strict=True):
-        if y_value == 0.0:
-            relative_uncertainty.append(0.0)
-            continue
-        relative_uncertainty.append(abs(err_value / y_value))
-    return relative_uncertainty
+    return LiveHistogramPlotter(
+        args.histogram_q_min,
+        args.histogram_q_bin_size,
+        histogram_bins,
+        getattr(args, "statistics_x_axis", "proton-charge"),
+    )
 
 
 def maybe_update_live_plot(
@@ -279,12 +500,16 @@ def maybe_update_live_plot(
     update_index: int,
     *,
     force: bool = False,
+    statistics_series=None,
 ) -> None:
     if not force and update_index % refresh_every != 0:
         return
 
+    # Snapshotting copies the whole series, so it happens after the throttle check rather
+    # than on every packet.
+    statistics = statistics_series.snapshot() if statistics_series is not None else None
     intensity = [float(value) for value in hist]
-    plotter.update(intensity, error, compute_relative_uncertainty(intensity, error))
+    plotter.update(intensity, error, compute_relative_uncertainty(intensity, error), statistics)
 
 
 def _browser_plot_html() -> str:
@@ -578,6 +803,21 @@ def _browser_plot_html() -> str:
             min-height: 0;
         }
 
+        /* The 1D and 2D views swap inside the fixed-height chart shell, so each wrapper has to
+           carry the flex sizing itself or the canvas inside it collapses. */
+        #statistics-1d,
+        #statistics-2d {
+            flex: 1 1 auto;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #statistics-map-hint {
+            margin: 6px 0 0 0;
+            flex: 0 0 auto;
+        }
+
         .stack {
             display: grid;
             gap: 18px;
@@ -658,6 +898,8 @@ def _browser_plot_html() -> str:
                 <div class=\"metric\"><span class=\"metric-label\">Nonzero bins</span><span class=\"metric-value\" id=\"nonzero-bins\">0</span></div>
                 <div class=\"metric\"><span class=\"metric-label\">Peak I(Q)</span><span class=\"metric-value\" id=\"max-intensity\">0</span></div>
                 <div class=\"metric\"><span class=\"metric-label\">Mean sigma / I(Q)</span><span class=\"metric-value\" id=\"mean-relative-uncertainty\">0</span></div>
+                <div class=\"metric\"><span class=\"metric-label\">Elapsed time (s)</span><span class=\"metric-value\" id=\"elapsed-seconds\">0</span></div>
+                <div class=\"metric\"><span class=\"metric-label\">Proton charge (pC)</span><span class=\"metric-value\" id=\"proton-charge\">0</span></div>
             </div>
         </section>
 
@@ -691,7 +933,7 @@ def _browser_plot_html() -> str:
                     <div class=\"panel-header\">
                         <span class=\"panel-kicker\">Quality Monitor</span>
                         <h3 class=\"panel-title\">Relative Uncertainty</h3>
-                        <p class=\"panel-copy\">Per-bin $\sigma / I(Q)$ trend for the current live histogram.</p>
+                        <p class=\"panel-copy\">Per-bin $\\sigma / I(Q)$ trend for the current live histogram.</p>
                     </div>
                     <div class=\"panel-body\">
                         <div class=\"chart-shell\">
@@ -706,6 +948,38 @@ def _browser_plot_html() -> str:
                                 </div>
                             </div>
                             <canvas id=\"relative\"></canvas>
+                        </div>
+                    </div>
+                </section>
+
+                <section class=\"panel\">
+                    <div class=\"panel-header\">
+                        <span class=\"panel-kicker\">Forecasting</span>
+                        <h3 class=\"panel-title\">Error Decay</h3>
+                        <p class=\"panel-copy\">Mean &sigma; / I(Q) over populated bins as time and proton charge accumulate.</p>
+                    </div>
+                    <div class=\"panel-body\">
+                        <div class=\"chart-shell\">
+                            <div class=\"chart-toolbar\">
+                                <span class=\"chart-hint\">Switch the x axis between elapsed time and integrated proton charge.</span>
+                                <div class=\"chart-actions\">
+                                    <button class=\"chart-reset\" type=\"button\" id=\"statistics-view-toggle\">2D map</button>
+                                    <button class=\"chart-reset\" type=\"button\" id=\"statistics-x-toggle\">Proton charge</button>
+                                    <button class=\"chart-reset\" type=\"button\" id=\"statistics-scale-toggle\">Linear</button>
+                                    <button class=\"chart-reset\" type=\"button\" id=\"zoom-in-statistics\">Zoom in</button>
+                                    <button class=\"chart-reset\" type=\"button\" id=\"zoom-out-statistics\">Zoom out</button>
+                                    <button class=\"chart-reset\" type=\"button\" id=\"pan-left-statistics\">Pan left</button>
+                                    <button class=\"chart-reset\" type=\"button\" id=\"pan-right-statistics\">Pan right</button>
+                                    <button class=\"chart-reset\" type=\"button\" id=\"reset-statistics\">Reset view</button>
+                                </div>
+                            </div>
+                            <div id=\"statistics-1d\">
+                                <canvas id=\"statistics\"></canvas>
+                            </div>
+                            <div id=\"statistics-2d\" style=\"display: none;\">
+                                <canvas id=\"statistics-map\"></canvas>
+                                <p class=\"chart-hint\" id=\"statistics-map-hint\">Waiting for data...</p>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -900,6 +1174,19 @@ def _browser_plot_html() -> str:
             chart.$liveBoundsInitialized = true;
         }
 
+        // The statistics x domain grows as the run accumulates, so unlike the fixed Q axis
+        // its bounds must be refreshed on every update rather than latched on first data.
+        function refreshXAxisBounds(chart, xValues) {
+            if (!xValues.length) {
+                return;
+            }
+            chart.$liveOriginalXBounds = {
+                min: xValues[0],
+                max: Math.max(xValues[xValues.length - 1], xValues[0] + 1e-9),
+            };
+            chart.$liveBoundsInitialized = true;
+        }
+
         function resetXAxisBounds(chart) {
             const bounds = chart.$liveOriginalXBounds;
             if (!bounds) {
@@ -1073,8 +1360,48 @@ def _browser_plot_html() -> str:
             }
         });
 
+        const statisticsChart = new Chart(document.getElementById('statistics'), {
+            type: 'line',
+            data: {
+                datasets: [{
+                    label: 'mean sigma / I(Q)',
+                    data: [],
+                    borderColor: '#1b7837',
+                    backgroundColor: 'rgba(27, 120, 55, 0.12)',
+                    pointRadius: 2,
+                    borderWidth: 1.8,
+                    tension: 0.08,
+                    fill: false,
+                }],
+            },
+            options: {
+                animation: false,
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { labels: { color: '#29435c', boxWidth: 14 } },
+                    zoom: zoomPluginOptions(),
+                },
+                scales: {
+                    x: {
+                        type: 'linear',
+                        title: { display: true, text: 'Proton charge (pC)', color: '#29435c', font: { weight: '700' } },
+                        ticks: { color: '#4f6478', maxTicksLimit: 10 },
+                        grid: { color: 'rgba(120, 144, 168, 0.18)' },
+                    },
+                    y: {
+                        title: { display: true, text: 'mean sigma / I(Q)', color: '#29435c', font: { weight: '700' } },
+                        ticks: { color: '#4f6478' },
+                        grid: { color: 'rgba(120, 144, 168, 0.18)' },
+                    },
+                },
+                layout: { padding: { left: 6, right: 10, top: 8, bottom: 4 } },
+            }
+        });
+
         intensityChart.canvas.parentNode.style.background = plotBackground;
         relativeChart.canvas.parentNode.style.background = plotBackground;
+        statisticsChart.canvas.parentNode.style.background = plotBackground;
 
         let interactionDepth = 0;
 
@@ -1100,6 +1427,7 @@ def _browser_plot_html() -> str:
 
         registerInteractionGuards(intensityChart);
         registerInteractionGuards(relativeChart);
+        registerInteractionGuards(statisticsChart);
 
         document.getElementById('zoom-in-intensity').addEventListener('click', () => zoomXAxis(intensityChart, 0.5));
         document.getElementById('zoom-out-intensity').addEventListener('click', () => zoomXAxis(intensityChart, 2));
@@ -1111,6 +1439,264 @@ def _browser_plot_html() -> str:
         document.getElementById('pan-left-relative').addEventListener('click', () => panXAxis(relativeChart, -0.2));
         document.getElementById('pan-right-relative').addEventListener('click', () => panXAxis(relativeChart, 0.2));
         document.getElementById('reset-relative').addEventListener('click', () => resetXAxisBounds(relativeChart));
+        document.getElementById('zoom-in-statistics').addEventListener('click', () => zoomXAxis(statisticsChart, 0.5));
+        document.getElementById('zoom-out-statistics').addEventListener('click', () => zoomXAxis(statisticsChart, 2));
+        document.getElementById('pan-left-statistics').addEventListener('click', () => panXAxis(statisticsChart, -0.2));
+        document.getElementById('pan-right-statistics').addEventListener('click', () => panXAxis(statisticsChart, 0.2));
+        document.getElementById('reset-statistics').addEventListener('click', () => resetXAxisBounds(statisticsChart));
+
+        let statisticsXAxis = 'proton-charge';
+
+        function renderStatistics(payload) {
+            const statistics = payload.statistics;
+            const xValues = statisticsXAxis === 'time' ? statistics.elapsed_seconds : statistics.proton_charge_pc;
+            const series = toSeries(xValues, statistics.mean_relative_uncertainty);
+            refreshXAxisBounds(statisticsChart, xValues);
+            statisticsChart.data.datasets[0].data = series;
+            statisticsChart.options.scales.x.title.text =
+                statisticsXAxis === 'time' ? 'Elapsed time (s)' : 'Proton charge (pC)';
+            statisticsChart.update('none');
+        }
+
+        // --- 2D sigma/I(Q) map -------------------------------------------------------------
+        // Chart.js has no heatmap and the page loads no other chart library, so the map is
+        // drawn straight onto a canvas: axes, cells and colour bar.
+
+        let statisticsView = '1d';
+        let statisticsMapScale = 'logarithmic';
+        let latestMap = null;
+
+        // Viridis anchors. Perceptually uniform, and readable for the colour-vision deficient,
+        // which a red-green ramp would not be.
+        const VIRIDIS = [
+            [68, 1, 84], [72, 40, 120], [62, 74, 137], [49, 104, 142],
+            [38, 130, 142], [31, 158, 137], [53, 183, 121], [110, 206, 88],
+            [181, 222, 43], [253, 231, 37],
+        ];
+
+        function viridis(t) {
+            const clamped = Math.min(1, Math.max(0, t));
+            const scaled = clamped * (VIRIDIS.length - 1);
+            const index = Math.min(VIRIDIS.length - 2, Math.floor(scaled));
+            const frac = scaled - index;
+            const [r1, g1, b1] = VIRIDIS[index];
+            const [r2, g2, b2] = VIRIDIS[index + 1];
+            return `rgb(${Math.round(r1 + (r2 - r1) * frac)}, ${Math.round(g1 + (g2 - g1) * frac)}, ${Math.round(b1 + (b2 - b1) * frac)})`;
+        }
+
+        function mapExtent(values) {
+            let min = Infinity;
+            let max = -Infinity;
+            for (const row of values) {
+                for (const value of row) {
+                    if (value === null || !Number.isFinite(value) || value <= 0) {
+                        continue;
+                    }
+                    if (value < min) min = value;
+                    if (value > max) max = value;
+                }
+            }
+            return Number.isFinite(min) ? { min, max: Math.max(max, min * 1.000001) } : null;
+        }
+
+        function normalize(value, extent) {
+            if (statisticsMapScale === 'logarithmic') {
+                return (Math.log(value) - Math.log(extent.min)) / (Math.log(extent.max) - Math.log(extent.min));
+            }
+            return (value - extent.min) / (extent.max - extent.min);
+        }
+
+        // Rows land wherever their sample landed, so each one spans to the midpoint of its
+        // neighbours rather than assuming a uniform grid.
+        function rowEdges(axisValues) {
+            const n = axisValues.length;
+            if (n === 1) {
+                return [[axisValues[0] - 0.5, axisValues[0] + 0.5]];
+            }
+            return axisValues.map((value, index) => {
+                const previous = index === 0 ? value - (axisValues[1] - value) : axisValues[index - 1];
+                const next = index === n - 1 ? value + (value - axisValues[n - 2]) : axisValues[index + 1];
+                return [(previous + value) / 2, (value + next) / 2];
+            });
+        }
+
+        function formatAxisNumber(value, span) {
+            if (span !== 0 && (Math.abs(value) >= 1e5 || (Math.abs(value) > 0 && Math.abs(span) < 1e-2))) {
+                return value.toExponential(1);
+            }
+            return value.toFixed(Math.abs(span) < 10 ? 2 : 0);
+        }
+
+        function drawStatisticsMap() {
+            const canvas = document.getElementById('statistics-map');
+            const hint = document.getElementById('statistics-map-hint');
+            // The stylesheet sizes canvases with `!important`, which beats an inline style, so
+            // the layout size is read back rather than assigned: the backing store is matched
+            // to whatever CSS actually gave us, and everything below is drawn in CSS pixels.
+            const cssWidth = Math.max(320, canvas.clientWidth || 640);
+            const cssHeight = Math.max(240, canvas.clientHeight || 340);
+            const ratio = window.devicePixelRatio || 1;
+            canvas.width = Math.round(cssWidth * ratio);
+            canvas.height = Math.round(cssHeight * ratio);
+            const ctx = canvas.getContext('2d');
+            ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+            ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+            if (!latestMap || !latestMap.values.length || !latestMap.q_values.length) {
+                hint.textContent = 'Waiting for data...';
+                return;
+            }
+            const extent = mapExtent(latestMap.values);
+            if (!extent) {
+                hint.textContent = 'No populated bins in the statistics Q window yet.';
+                return;
+            }
+
+            const left = 72;
+            const right = cssWidth - 96;
+            const top = 14;
+            const bottom = cssHeight - 46;
+            const plotWidth = right - left;
+            const plotHeight = bottom - top;
+
+            const qValues = latestMap.q_values;
+            const qStep = qValues.length > 1 ? qValues[1] - qValues[0] : 1;
+            const qMin = qValues[0] - qStep / 2;
+            const qMax = qValues[qValues.length - 1] + qStep / 2;
+            const edges = rowEdges(latestMap.axis_values);
+            const yMin = edges[0][0];
+            const yMax = edges[edges.length - 1][1];
+
+            const xOf = (q) => left + ((q - qMin) / (qMax - qMin)) * plotWidth;
+            // Charge grows downward in the source data but reads better growing upward.
+            const yOf = (value) => bottom - ((value - yMin) / (yMax - yMin || 1)) * plotHeight;
+
+            ctx.fillStyle = '#f4f6f8';
+            ctx.fillRect(left, top, plotWidth, plotHeight);
+
+            for (let row = 0; row < latestMap.values.length; row += 1) {
+                const [lowEdge, highEdge] = edges[row];
+                const yHigh = yOf(highEdge);
+                const cellHeight = Math.max(1, yOf(lowEdge) - yHigh);
+                const profile = latestMap.values[row];
+                for (let col = 0; col < profile.length; col += 1) {
+                    const value = profile[col];
+                    if (value === null || !Number.isFinite(value) || value <= 0) {
+                        continue;
+                    }
+                    const xStart = xOf(qValues[col] - qStep / 2);
+                    const cellWidth = Math.max(1, xOf(qValues[col] + qStep / 2) - xStart);
+                    ctx.fillStyle = viridis(normalize(value, extent));
+                    ctx.fillRect(xStart, yHigh, cellWidth, cellHeight);
+                }
+            }
+
+            ctx.strokeStyle = 'rgba(120, 144, 168, 0.55)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(left, top, plotWidth, plotHeight);
+
+            ctx.fillStyle = '#4f6478';
+            ctx.font = '11px system-ui, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            for (let tick = 0; tick <= 5; tick += 1) {
+                const q = qMin + ((qMax - qMin) * tick) / 5;
+                ctx.fillText(formatAxisNumber(q, qMax - qMin), xOf(q), bottom + 6);
+            }
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'middle';
+            for (let tick = 0; tick <= 5; tick += 1) {
+                const value = yMin + ((yMax - yMin) * tick) / 5;
+                ctx.fillText(formatAxisNumber(value, yMax - yMin), left - 8, yOf(value));
+            }
+
+            ctx.fillStyle = '#29435c';
+            ctx.font = '700 12px system-ui, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText('Q', (left + right) / 2, bottom + 24);
+            ctx.save();
+            ctx.translate(14, (top + bottom) / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText(statisticsXAxis === 'time' ? 'Elapsed time (s)' : 'Proton charge (pC)', 0, 0);
+            ctx.restore();
+
+            const barLeft = right + 18;
+            const barWidth = 14;
+            for (let y = 0; y < plotHeight; y += 1) {
+                ctx.fillStyle = viridis(1 - y / plotHeight);
+                ctx.fillRect(barLeft, top + y, barWidth, 1);
+            }
+            ctx.strokeRect(barLeft, top, barWidth, plotHeight);
+            ctx.fillStyle = '#4f6478';
+            ctx.font = '11px system-ui, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(extent.max.toExponential(1), barLeft + barWidth + 5, top + 6);
+            ctx.fillText(extent.min.toExponential(1), barLeft + barWidth + 5, bottom - 6);
+
+            hint.textContent =
+                `sigma / I(Q) over ${latestMap.values.length} samples x ${qValues.length} Q columns `
+                + `(${statisticsMapScale === 'logarithmic' ? 'log' : 'linear'} colour scale).`;
+        }
+
+        async function refreshStatisticsMap() {
+            if (statisticsView !== '2d') {
+                return;
+            }
+            try {
+                const response = await fetch(`/statistics-map?axis=${statisticsXAxis}`, { cache: 'no-store' });
+                latestMap = await response.json();
+            } catch (error) {
+                return;
+            }
+            drawStatisticsMap();
+        }
+
+        function applyStatisticsView() {
+            const is2d = statisticsView === '2d';
+            document.getElementById('statistics-1d').style.display = is2d ? 'none' : '';
+            document.getElementById('statistics-2d').style.display = is2d ? '' : 'none';
+            document.getElementById('statistics-view-toggle').textContent = is2d ? '1D trend' : '2D map';
+            document.getElementById('statistics-scale-toggle').style.display = is2d ? '' : 'none';
+            for (const id of ['zoom-in', 'zoom-out', 'pan-left', 'pan-right', 'reset']) {
+                document.getElementById(`${id}-statistics`).style.display = is2d ? 'none' : '';
+            }
+            if (is2d) {
+                refreshStatisticsMap();
+            }
+        }
+
+        document.getElementById('statistics-view-toggle').addEventListener('click', () => {
+            statisticsView = statisticsView === '2d' ? '1d' : '2d';
+            applyStatisticsView();
+        });
+
+        document.getElementById('statistics-scale-toggle').addEventListener('click', () => {
+            statisticsMapScale = statisticsMapScale === 'logarithmic' ? 'linear' : 'logarithmic';
+            document.getElementById('statistics-scale-toggle').textContent =
+                statisticsMapScale === 'logarithmic' ? 'Linear' : 'Log';
+            drawStatisticsMap();
+        });
+
+        window.addEventListener('resize', () => {
+            if (statisticsView === '2d') {
+                drawStatisticsMap();
+            }
+        });
+
+        document.getElementById('statistics-x-toggle').addEventListener('click', () => {
+            statisticsXAxis = statisticsXAxis === 'time' ? 'proton-charge' : 'time';
+            document.getElementById('statistics-x-toggle').textContent =
+                statisticsXAxis === 'time' ? 'Elapsed time' : 'Proton charge';
+            if (statisticsView === '2d') {
+                refreshStatisticsMap();
+            } else if (latestPayload) {
+                renderStatistics(latestPayload);
+            }
+        });
+
+        applyStatisticsView();
 
         function formatRange(values) {
             if (!values.length) {
@@ -1165,6 +1751,8 @@ def _browser_plot_html() -> str:
             initializeXAxisBounds(relativeChart, payload.q_values);
             relativeChart.data.datasets[0].data = relativeSeries;
             relativeChart.update('none');
+            renderStatistics(payload);
+            refreshStatisticsMap();
             const statusElement = document.getElementById('status');
             const runStateElement = document.getElementById('run-state');
             const isClosed = payload.closed;
@@ -1179,6 +1767,8 @@ def _browser_plot_html() -> str:
             document.getElementById('nonzero-bins').textContent = status.nonzero_bins.toLocaleString();
             document.getElementById('max-intensity').textContent = status.max_intensity.toLocaleString(undefined, { maximumFractionDigits: 2 });
             document.getElementById('mean-relative-uncertainty').textContent = status.mean_relative_uncertainty.toLocaleString(undefined, { maximumFractionDigits: 4 });
+            document.getElementById('elapsed-seconds').textContent = status.elapsed_seconds.toLocaleString(undefined, { maximumFractionDigits: 1 });
+            document.getElementById('proton-charge').textContent = status.proton_charge_pc.toLocaleString(undefined, { maximumFractionDigits: 0 });
             document.getElementById('q-range').textContent = formatRange(payload.q_values);
             document.getElementById('bin-count').textContent = payload.q_values.length.toLocaleString();
         }

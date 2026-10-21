@@ -21,7 +21,7 @@ class _Reader:
 
 
 class _Plotter:
-    def update(self, intensity, error, relative_uncertainty):
+    def update(self, intensity, error, relative_uncertainty, _statistics=None):
         _ = intensity, error, relative_uncertainty
 
 

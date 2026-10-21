@@ -231,7 +231,87 @@ That starts the ADARA file browser live-plot workflow and publishes it on `http:
 Because the compose file now uses profiles, `docker compose up` by itself will not start any of the three analysis services.
 
 The browser page now includes a small status panel with live plot update count, total counts,
-nonzero bins, peak intensity, and mean relative uncertainty so you can see progress at a glance.
+nonzero bins, peak intensity, mean relative uncertainty, elapsed time, and integrated proton
+charge so you can see progress at a glance.
+
+### Error decay statistics and normalization by time / proton charge
+
+The analyzer records how the error in q-space decays as time and proton charge accumulate.
+That series is what a downstream service needs in order to forecast how long a run must keep
+going to reach a target error. Proton charge and pulse time are read from ADARA RTDL packets on
+the live stream; for NeXus replays they are attributed from the run-level `entry/duration` and
+`entry/proton_charge` totals in proportion to the events processed so far.
+
+Histograms are normalized by integrated proton charge by default, since that is the quantity
+runs are actually counted against. Pass `--normalize-by none` for raw counts.
+
+```bash
+uv run live_stream_analysis analyze \
+    --adara-stream bl1b-daq1.sns.gov 31415 \
+    --histogram-pixel-geometry-csv pixel_geometry.csv \
+    --histogram-q-bin-size 0.02 \
+    --histogram-q-max 30 \
+    --statistics-output-csv statistics.csv \
+    --statistics-q-min 1.0 \
+    --statistics-q-max 10.0 \
+    --statistics-sample-interval-seconds 5 \
+    --live-plot-mode browser
+```
+
+| Option | Purpose |
+| --- | --- |
+| `--normalize-by {proton-charge,time,none}` | Divide the corrected histogram by integrated proton charge or accumulated run time. Default `proton-charge`. Counts stay unscaled until the chosen quantity starts accumulating, and when the source reports neither, so a file without charge still yields raw counts. Pass `none` to opt out. |
+| `--statistics-output-csv FILE` | Write the decay series with columns `Elapsed time (s)`, `Proton charge (pC)`, `Mean sigma/I(Q)`, `Total counts`, `Nonzero bins`, `Histogrammed events`. |
+| `--statistics-map-output-csv FILE` | Write the 2D map: one row per sample, one column per Q in the window, prefixed by elapsed time and proton charge. |
+| `--statistics-q-min` / `--statistics-q-max` | Restrict the statistics to a Q window. Defaults to every populated bin. This window is also the Q extent of the 2D map. |
+| `--statistics-sample-interval-seconds` | Minimum accumulated run time between samples. Default `1.0`. |
+| `--statistics-x-axis {time,proton-charge}` | Independent variable for the desktop error-decay panel. Default `proton-charge`; the browser plot toggles between both without restarting. |
+
+Both live plots gain an **Error Decay** panel, and each INTERSECT `histogram_updated` event now
+carries `elapsed_seconds`, `proton_charge_pc`, and `mean_relative_uncertainty` so subscribers can
+accumulate the same curve without reading the CSV.
+
+#### 1D and 2D views
+
+The Error Decay panel has two views, toggled with a button in both the browser page and the
+desktop window:
+
+- **1D trend** — mean sigma/I(Q) against elapsed time or proton charge. Tells you *when* the run
+  converges.
+- **2D map** — Q across the bottom, elapsed time or proton charge up the side, and sigma/I(Q) as a
+  viridis colour. Tells you *which part of q-space* is still noisy, which the mean hides. The
+  colour scale is logarithmic by default (the error typically spans more than two decades) and
+  toggles to linear.
+
+Restricting the Q window makes the map far more useful, since it is the map's x extent:
+
+```bash
+uv run live_stream_analysis analyze \
+    --adara-stream bl1b-daq1.sns.gov 31415 \
+    --histogram-pixel-geometry-csv pixel_geometry.csv \
+    --statistics-q-min 15.0 \
+    --statistics-q-max 20.0 \
+    --statistics-map-output-csv statistics_map.csv \
+    --live-plot-mode browser
+```
+
+Two details worth knowing about the map's resolution. Adjacent Q bins are **averaged** into at
+most 256 columns when a sample is recorded, which bounds memory over a long run; a 5-wide window
+at the default 0.02 bin size is 250 bins and so comes through at full resolution. Rows, by
+contrast, are **selected** rather than averaged when there are more than 256 samples: each row is
+a snapshot at one accumulation level, so blending two would report a measurement that never
+happened. The browser fetches the map from its own `/statistics-map` endpoint, only while the 2D
+view is open, to keep the twice-a-second `/state` poll small.
+
+Because each sample now carries a full profile, the series bounds itself: past 4096 samples it
+drops every other one and doubles the effective sampling interval, so a live stream that runs for
+hours without a run boundary does not grow without limit. Thinning keeps the whole span rather
+than discarding the start of the run, since the steep early decay is the most informative part of
+the curve for a forecast.
+
+Note that sigma/I(Q) is unchanged by `--normalize-by`, since normalization scales the intensity
+and its uncertainty by the same divisor. The decay curve is therefore the same whether or not
+normalization is enabled.
 
 The same `analyze` command also accepts event NeXus sample inputs. Repeat
 `--nexus-file` to combine multiple sample runs while keeping the same histogram,
@@ -494,6 +574,6 @@ This project uses uv for lockfile management and development environments, with 
 
 | Experiment         | stream size | remote                                                    | local directory          | command     |
 |--------------------|-------------|-----------------------------------------------------------|--------------------------|-------------|
-| Fe2O3 - May 2025   | 300 GiB     | 10.64.135.253:/share_66aaa9bb_61c7_4f12_964e_7c14f30e2ad3 | nomad-adara-fe2o3-share  | sudo mount -t nfs 10.64.135.253:/share_66aaa9bb_61c7_4f12_964e_7c14f30e2ad3 ./nomad-adara-fe2o3-share |  
+| Fe2O3 - May 2025   | 300 GiB     | 10.64.135.253:/share_66aaa9bb_61c7_4f12_964e_7c14f30e2ad3 | nomad-adara-fe2o3-share  | sudo mount -t nfs 10.64.135.253:/share_66aaa9bb_61c7_4f12_964e_7c14f30e2ad3 ./nomad-adara-fe2o3-share |
 | Carbon - June 2026 | 1,100 GiB   | 10.64.135.253:/share_8b4e51ef_ab6f_4c13_a35e_d9bbeb751e39 | nomad-adara-carbon-share | sudo mount -t nfs 10.64.135.253:/share_8b4e51ef_ab6f_4c13_a35e_d9bbeb751e39 ./nomad-adara-carbon-share |
- 
+

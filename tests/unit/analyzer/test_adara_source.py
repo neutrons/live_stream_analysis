@@ -9,7 +9,8 @@ from readadara import AdaraFileReader
 from live_stream_analysis.analyzer.adara import accumulate_adara_histogram, build_reader
 from live_stream_analysis.analyzer.histogram import PixelQConversion
 from live_stream_analysis.analyzer.live_plot import NullHistogramPlotter
-from tests.unit.analyzer.adara_fixtures import event_packet
+from live_stream_analysis.statistics import RunStatistics, StatisticsSample
+from tests.unit.analyzer.adara_fixtures import event_packet, rtdl_packet
 
 
 def _write_adara(tmp_path: Path, *packets: bytes) -> Path:
@@ -190,11 +191,13 @@ def test_accumulate_adara_histogram_returns_at_end_run(monkeypatch: pytest.Monke
     so the returned histogram still holds this run's counts and later packets stay unread.
     """
     monkeypatch.setattr("live_stream_analysis.analyzer.adara.AdaraRunStatusPacket", _RunStatusPacket)
-    reader = _Reader([
-        _Packet([(100, 1)]),
-        _RunStatusPacket(4),
-        _Packet([(100, 1)]),
-    ])
+    reader = _Reader(
+        [
+            _Packet([(100, 1)]),
+            _RunStatusPacket(4),
+            _Packet([(100, 1)]),
+        ]
+    )
     q_conversion = PixelQConversion(
         q_matrix_constants=[0.0, 1000.0],
         difc=[0.0, 0.0],
@@ -285,11 +288,13 @@ def test_accumulate_adara_histogram_resets_but_keeps_reading_at_new_run(monkeypa
     before any events were seen.
     """
     monkeypatch.setattr("live_stream_analysis.analyzer.adara.AdaraRunStatusPacket", _RunStatusPacket)
-    reader = _Reader([
-        _Packet([(100, 1)]),
-        _RunStatusPacket(1),
-        _Packet([(100, 1)]),
-    ])
+    reader = _Reader(
+        [
+            _Packet([(100, 1)]),
+            _RunStatusPacket(1),
+            _Packet([(100, 1)]),
+        ]
+    )
     q_conversion = PixelQConversion(
         q_matrix_constants=[0.0, 1000.0],
         difc=[0.0, 0.0],
@@ -441,3 +446,131 @@ def test_accumulate_adara_histogram_tracks_invalid_and_out_of_range_events():
     assert stats.skipped_zero_or_negative_tof == 0
     assert stats.skipped_unconvertible_events == 1
     assert stats.skipped_out_of_range_bins == 1
+
+
+def _q_conversion_for_pixel_one() -> PixelQConversion:
+    return PixelQConversion(
+        q_matrix_constants=[0.0, 1000.0],
+        difc=[0.0, 0.0],
+        difa=[0.0, 0.0],
+        tzero=[0.0, 0.0],
+        use=[1, 1],
+    )
+
+
+def _accumulate_from_file(path: Path, run_statistics: RunStatistics):
+    return accumulate_adara_histogram(
+        reader=AdaraFileReader(filename=str(path)),
+        q_conversion=_q_conversion_for_pixel_one(),
+        histogram_bins=600,
+        histogram_q_min=0.0,
+        histogram_q_bin_size=0.02,
+        tof_tick_us=1.0,
+        plotter=NullHistogramPlotter(),
+        live_plot_refresh_every=1000,
+        event_log_interval=100_000,
+        run_statistics=run_statistics,
+    )
+
+
+def test_accumulate_adara_histogram_accumulates_proton_charge_from_rtdl_packets(tmp_path: Path):
+    """RTDL packets carry the per-pulse proton charge the error-decay curve is plotted against.
+
+    They are not banked event packets, so the charge is only captured if it is read before
+    the non-banked skip discards them.
+    """
+    path = _write_adara(
+        tmp_path,
+        rtdl_packet(timestamp_s=100, charge_10pc=100),
+        event_packet([(1, 100)], timestamp_s=100),
+        rtdl_packet(timestamp_s=103, charge_10pc=250),
+        event_packet([(1, 100)], timestamp_s=103),
+    )
+    run_statistics = RunStatistics()
+
+    _, _, histogram_events, _, stats = _accumulate_from_file(path, run_statistics)
+
+    assert histogram_events == 2
+    # charge_10pc is in units of 10 pC, so 100 + 250 units is 3500 pC.
+    assert run_statistics.accumulator.proton_charge_pc == pytest.approx(3500.0)
+    assert run_statistics.accumulator.elapsed_seconds == pytest.approx(3.0)
+    # The RTDL packets are still skipped for histogramming purposes.
+    assert stats.skipped_non_banked_packets == 2
+
+
+def test_accumulate_adara_histogram_leaves_charge_at_zero_without_rtdl_packets(tmp_path: Path):
+    path = _write_adara(tmp_path, event_packet([(1, 100)], timestamp_s=100))
+    run_statistics = RunStatistics()
+
+    _accumulate_from_file(path, run_statistics)
+
+    assert run_statistics.accumulator.proton_charge_pc == 0.0
+    assert run_statistics.accumulator.elapsed_seconds == 0.0
+
+
+def test_accumulate_adara_histogram_resets_charge_and_decay_series_at_new_run(monkeypatch: pytest.MonkeyPatch):
+    """A new run must start a fresh decay curve, just as it starts a fresh histogram."""
+    monkeypatch.setattr("live_stream_analysis.analyzer.adara.AdaraRunStatusPacket", _RunStatusPacket)
+    run_statistics = RunStatistics()
+    run_statistics.accumulator.observe_pulse(50.0, 9999.0)
+    run_statistics.series.record(
+        StatisticsSample(
+            elapsed_seconds=0.0,
+            proton_charge_pc=9999.0,
+            mean_relative_uncertainty=0.9,
+            total_counts=1.0,
+            nonzero_bins=1,
+            histogram_events=1,
+        )
+    )
+
+    accumulate_adara_histogram(
+        reader=_Reader([_Packet([(100, 1)]), _RunStatusPacket(1), _Packet([(100, 1)])]),
+        q_conversion=_q_conversion_for_pixel_one(),
+        histogram_bins=600,
+        histogram_q_min=0.0,
+        histogram_q_bin_size=0.02,
+        tof_tick_us=1.0,
+        plotter=NullHistogramPlotter(),
+        live_plot_refresh_every=1000,
+        event_log_interval=100_000,
+        run_statistics=run_statistics,
+    )
+
+    assert run_statistics.accumulator.proton_charge_pc == 0.0
+    assert run_statistics.series.samples() == []
+
+
+def test_accumulate_adara_histogram_tracks_time_without_any_rtdl_packets(tmp_path: Path):
+    """Every packet carries a timestamp, so the time axis works even with no charge source.
+
+    Deriving the clock from RTDL packets alone pinned every sample to elapsed=0, which
+    collapses the whole decay series onto a single x value.
+    """
+    path = _write_adara(
+        tmp_path,
+        event_packet([(1, 100)], timestamp_s=100),
+        event_packet([(1, 100)], timestamp_s=142),
+    )
+    run_statistics = RunStatistics()
+
+    _, _, _, _, stats = _accumulate_from_file(path, run_statistics)
+
+    assert run_statistics.accumulator.elapsed_seconds == pytest.approx(42.0)
+    assert run_statistics.accumulator.proton_charge_pc == 0.0
+    assert stats.rtdl_packets == 0
+
+
+def test_accumulate_adara_histogram_counts_rtdl_packets_for_reporting(tmp_path: Path):
+    path = _write_adara(
+        tmp_path,
+        rtdl_packet(timestamp_s=100, charge_10pc=100),
+        event_packet([(1, 100)], timestamp_s=100),
+        rtdl_packet(timestamp_s=101, charge_10pc=100),
+    )
+    run_statistics = RunStatistics()
+
+    _, _, _, _, stats = _accumulate_from_file(path, run_statistics)
+
+    assert stats.rtdl_packets == 2
+    assert run_statistics.accumulator.proton_charge_pc == pytest.approx(2000.0)

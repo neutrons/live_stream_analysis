@@ -10,6 +10,7 @@ from live_stream_analysis.analyzer.histogram import (
     PixelQConversion,
     apply_corrections,
     bin_centre_q_values,
+    compute_relative_uncertainty,
     load_pixel_q_conversion,
     load_q_matrix_constants,
     pixel_tof_to_q,
@@ -17,6 +18,7 @@ from live_stream_analysis.analyzer.histogram import (
     write_histogram_csv,
 )
 from live_stream_analysis.analyzer.live_plot import LiveHistogramPlotter, _BrowserPlotState
+from live_stream_analysis.intersect.service import HistogramRuntimeState
 
 
 def test_load_q_matrix_constants_maps_pixel_ids(tmp_path: Path):
@@ -171,3 +173,110 @@ def test_csv_live_plots_and_intersect_all_label_bins_identically(tmp_path: Path)
 
     browser_state = _BrowserPlotState(bin_centre_q_values(q_min, q_bin_size, bins))
     assert browser_state.snapshot()["q_values"] == [pytest.approx(value) for value in expected]
+
+
+def _normalization_args(normalize_by: str) -> argparse.Namespace:
+    return argparse.Namespace(
+        background_subtraction=None,
+        normalization=None,
+        histogram_q_min=0.0,
+        histogram_q_bin_size=0.02,
+        histogram_q_max=0.04,
+        sample_coherent_scatter_length=None,
+        sample_total_scatter_length_squared=None,
+        normalize_by=normalize_by,
+    )
+
+
+def _runtime_state_with(elapsed_seconds: float, proton_charge_pc: float) -> HistogramRuntimeState:
+    state = HistogramRuntimeState()
+    state.run_statistics.accumulator.observe_progress(elapsed_seconds, proton_charge_pc)
+    return state
+
+
+def test_apply_corrections_normalizes_by_proton_charge():
+    state = _runtime_state_with(elapsed_seconds=10.0, proton_charge_pc=4.0)
+
+    corrected, error = apply_corrections([16, 64], _normalization_args("proton-charge"), 2, runtime_state=state)
+
+    # Intensity divides by the charge; variance divides by its square, so sigma also divides by it.
+    assert corrected == [pytest.approx(4.0), pytest.approx(16.0)]
+    assert error == [pytest.approx(1.0), pytest.approx(2.0)]
+
+
+def test_apply_corrections_normalizes_by_elapsed_time():
+    state = _runtime_state_with(elapsed_seconds=4.0, proton_charge_pc=1000.0)
+
+    corrected, error = apply_corrections([16, 64], _normalization_args("time"), 2, runtime_state=state)
+
+    assert corrected == [pytest.approx(4.0), pytest.approx(16.0)]
+    assert error == [pytest.approx(1.0), pytest.approx(2.0)]
+
+
+def test_apply_corrections_leaves_counts_unscaled_before_anything_accumulates():
+    """Dividing by a not-yet-accumulated charge would blow the histogram up to infinity."""
+    state = _runtime_state_with(elapsed_seconds=0.0, proton_charge_pc=0.0)
+
+    corrected, error = apply_corrections([16, 64], _normalization_args("proton-charge"), 2, runtime_state=state)
+
+    assert corrected == [pytest.approx(16.0), pytest.approx(64.0)]
+    assert error == [pytest.approx(4.0), pytest.approx(8.0)]
+
+
+def test_apply_corrections_defaults_to_no_accumulation_normalization():
+    state = _runtime_state_with(elapsed_seconds=10.0, proton_charge_pc=4.0)
+
+    corrected, _ = apply_corrections([16, 64], _normalization_args("none"), 2, runtime_state=state)
+
+    assert corrected == [pytest.approx(16.0), pytest.approx(64.0)]
+
+
+def test_relative_uncertainty_is_invariant_under_accumulation_normalization():
+    """The #38 decay metric must not shift depending on whether #37 normalization is on.
+
+    Normalizing scales I and sigma by the same divisor, so sigma/I(Q) -- and therefore the
+    whole error-decay curve -- has to come out identical either way.
+    """
+    state = _runtime_state_with(elapsed_seconds=7.0, proton_charge_pc=1234.5)
+    hist = [16, 64, 100]
+
+    plain, plain_error = apply_corrections(hist, _normalization_args("none"), 3, runtime_state=state)
+    scaled, scaled_error = apply_corrections(hist, _normalization_args("proton-charge"), 3, runtime_state=state)
+
+    assert scaled != plain
+    assert compute_relative_uncertainty(scaled, scaled_error) == [
+        pytest.approx(value) for value in compute_relative_uncertainty(plain, plain_error)
+    ]
+
+
+def test_validate_rejects_a_statistics_window_entirely_above_the_histogram():
+    """An out-of-range window selects no bins and would silently produce an empty series."""
+    args = argparse.Namespace(
+        histogram_q_bin_size=0.02,
+        histogram_q_min=0.0,
+        histogram_q_max=30.0,
+        tof_tick_us=1.0,
+        live_plot_refresh_every=1,
+        statistics_q_min=40.0,
+        statistics_q_max=50.0,
+        statistics_sample_interval_seconds=1.0,
+    )
+
+    with pytest.raises(ValueError, match="--statistics-q-min must be < --histogram-q-max"):
+        validate_histogram_args(args)
+
+
+def test_validate_rejects_a_statistics_window_entirely_below_the_histogram():
+    args = argparse.Namespace(
+        histogram_q_bin_size=0.02,
+        histogram_q_min=10.0,
+        histogram_q_max=30.0,
+        tof_tick_us=1.0,
+        live_plot_refresh_every=1,
+        statistics_q_min=1.0,
+        statistics_q_max=5.0,
+        statistics_sample_interval_seconds=1.0,
+    )
+
+    with pytest.raises(ValueError, match="--statistics-q-max must be > --histogram-q-min"):
+        validate_histogram_args(args)

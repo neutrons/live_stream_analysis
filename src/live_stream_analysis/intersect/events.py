@@ -1,12 +1,23 @@
 import re
 
+from ..statistics import StatisticsSample
 from .data_models import HistogramEventPayload, RunCompleteEventPayload, RunMetadata
 
 
 def build_histogram_payload(
-    q_values: list[float], intensities: list[float], errors: list[float]
+    q_values: list[float],
+    intensities: list[float],
+    errors: list[float],
+    sample: StatisticsSample | None = None,
 ) -> HistogramEventPayload:
-    return HistogramEventPayload(q=q_values, intensity=intensities, error=errors)
+    return HistogramEventPayload(
+        q=q_values,
+        intensity=intensities,
+        error=errors,
+        elapsed_seconds=sample.elapsed_seconds if sample is not None else None,
+        proton_charge_pc=sample.proton_charge_pc if sample is not None else None,
+        mean_relative_uncertainty=sample.mean_relative_uncertainty if sample is not None else None,
+    )
 
 
 def build_run_complete_payload(metadata: RunMetadata) -> RunCompleteEventPayload:
