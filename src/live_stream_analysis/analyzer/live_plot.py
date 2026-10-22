@@ -223,6 +223,9 @@ class BrowserHistogramPlotter:
         self._state.update(intensity, error, relative_uncertainty, statistics)
 
     def wait_until_closed(self) -> None:
+        # Processing is over by the time anything waits here, so mark it complete. Otherwise a
+        # page kept open with --live-plot-keep-open reports "Streaming updates" indefinitely.
+        self._state.close()
         self._thread.join()
 
     def close(self) -> None:

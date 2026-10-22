@@ -7,6 +7,13 @@
 
 Repository for working on live stream analysis
 
+## Walkthrough notebooks
+
+[notebooks/](notebooks/README.md) walks through the whole workflow on NOMAD diamond data:
+`preparer` first, then `analyze` on a NeXus file, an ADARA file, and a live (or replayed) ADARA
+stream. Each step comes as a CLI notebook and a Python-library notebook, and each analyze notebook
+shows the live plot inside the notebook.
+
 ## IDF Pre-Processing Helper
 
 The package includes a pure-Python helper CLI subcommand for pre-processing Mantid IDF XML files.
@@ -172,7 +179,9 @@ Current analyzer behavior is:
 1. Keep histogramming events normally across packets.
 2. When a run-status packet with `status == 4` (`END_RUN`) arrives, finalize the
     current histogram immediately.
-3. Apply background subtraction and normalization to that completed run.
+3. Apply background subtraction and normalization to that completed run, and write it to
+    `--histogram-output-csv`. A live stream only stops when interrupted, so this is the write
+    that leaves each completed run on disk.
 4. Publish the final corrected histogram snapshot and the INTERSECT
     `run_completed` event when INTERSECT mode is enabled.
 5. Reset the in-memory histogram buffer to zeros so subsequent packets start a

@@ -78,6 +78,27 @@ class AdaraHistogramStats:
     rtdl_packets: int = 0
 
 
+class _EofRaisingSocket:
+    """Socket wrapper whose recv() raises once the server has closed the connection.
+
+    readadara's BufferedSocket calls recv() in a loop until it has the bytes it asked for. After
+    a clean close recv() returns b"" forever, so the analyzer would spin at 100% CPU and never
+    reach its reconnect path; only a reset raised. Raising here sends a clean close there too.
+    """
+
+    def __init__(self, sock):
+        self._sock = sock
+
+    def recv(self, num_bytes: int) -> bytes:
+        data = self._sock.recv(num_bytes)
+        if not data:
+            raise ConnectionError("ADARA live stream closed by the server")
+        return data
+
+    def __getattr__(self, name: str):
+        return getattr(self._sock, name)
+
+
 def build_reader(args: argparse.Namespace):
     """Construct the appropriate ADARA reader from parsed arguments."""
     has_file = args.adara_file is not None
@@ -103,7 +124,9 @@ def build_reader(args: argparse.Namespace):
             port = int(port_str)
         except ValueError as exc:
             raise ValueError(f"PORT must be an integer, got: {port_str!r}") from exc
-        return AdaraLiveStreamReader(hostname, port)
+        reader = AdaraLiveStreamReader(hostname, port)
+        reader.buffered_stream.sd = _EofRaisingSocket(reader.buffered_stream.sd)
+        return reader
 
     raise ValueError(
         "No data source specified. Use --adara-file FILE, --nexus-file FILE, or --adara-stream HOSTNAME PORT."

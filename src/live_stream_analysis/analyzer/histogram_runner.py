@@ -257,6 +257,10 @@ class _HistogramSession:
             self.run_completion_handled,
         )
         final_hist, final_error = self.corrected(hist)
+        # A live stream only ends when interrupted, and that path skips _write_final_outputs, so
+        # each run is written as it completes or it is never written.
+        if self.args.histogram_output_csv is not None:
+            _write_histogram_output(final_hist, final_error, self.args)
         # Close the decay series on the totals this run actually reached, before the plot
         # and the INTERSECT event below read it. Every histogrammed event increments exactly
         # one bin, so the raw histogram sums to this run's accepted-event count -- the
