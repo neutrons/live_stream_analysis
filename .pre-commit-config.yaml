@@ -27,6 +27,8 @@ repos:
     hooks:
       - id: codespell
         exclude: "tests/cis_tests/.*"
+        # Skip base64 image outputs in notebooks, which spell nonsense words by chance.
+        args: ['--ignore-regex="image/png": "[^"]*"']
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.0
     hooks:
