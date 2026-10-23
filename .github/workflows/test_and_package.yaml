@@ -73,6 +73,38 @@ jobs:
         uses: codecov/codecov-action@v7
         if: false
 
+  notebooks:
+    name: Walkthrough notebooks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --frozen --group jupyter
+
+      # Every walkthrough, in order, on the tutorial dataset in tests/data/tutorial/. The preparer
+      # notebooks sort first and write the CSVs the analyze notebooks read. Executed copies go to
+      # a scratch directory so the committed outputs are left alone.
+      - name: Run notebooks
+        run: |
+          for notebook in notebooks/0*.ipynb; do
+            echo "::group::$notebook"
+            uv run --group jupyter jupyter nbconvert --to notebook --execute \
+              --ExecutePreprocessor.timeout=600 --output-dir "$RUNNER_TEMP/notebooks" "$notebook"
+            echo "::endgroup::"
+          done
+
   docker-tests:
     name: Docker build and test
     runs-on: ubuntu-latest

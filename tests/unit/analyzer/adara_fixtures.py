@@ -65,4 +65,4 @@ def run_status_packet(
         (paused << 24) | pause_file_number,
         (addendum << 24) | addendum_file_number,
     )
-    return _pack_header(len(payload), 0x400301, timestamp_s)
+    return _pack_header(len(payload), 0x400301, timestamp_s) + payload

@@ -24,6 +24,10 @@ LOGGER = logging.getLogger(__name__)
 ADARA_RUN_STATUS_NEW_RUN = 1
 ADARA_RUN_STATUS_END_RUN = 4
 ADARA_BANKED_EVENT_FORMAT = 0x400001
+ADARA_RTDL_FORMAT = 0x100
+ADARA_BEAM_MONITOR_EVENT_FORMAT = 0x400101
+# Packets stamped with the time of the neutron pulse they describe.
+ADARA_PULSE_FORMATS = frozenset({ADARA_RTDL_FORMAT, ADARA_BANKED_EVENT_FORMAT, ADARA_BEAM_MONITOR_EVENT_FORMAT})
 
 
 def _safe_packet_attr(packet, attr: str):
@@ -43,6 +47,16 @@ def _packet_timestamp(packet) -> float | None:
     try:
         return float(getter())
     except Exception:  # noqa: BLE001 - a malformed timestamp is treated as absent
+        return None
+
+
+def _packet_format(packet) -> int | None:
+    getter = getattr(packet, "get_format_int", None)
+    if getter is None:
+        return None
+    try:
+        return int(getter())
+    except Exception:  # noqa: BLE001 - a malformed header is treated as an unknown format
         return None
 
 
@@ -78,6 +92,27 @@ class AdaraHistogramStats:
     rtdl_packets: int = 0
 
 
+class _EofRaisingSocket:
+    """Socket wrapper whose recv() raises once the server has closed the connection.
+
+    readadara's BufferedSocket calls recv() in a loop until it has the bytes it asked for. After
+    a clean close recv() returns b"" forever, so the analyzer would spin at 100% CPU and never
+    reach its reconnect path; only a reset raised. Raising here sends a clean close there too.
+    """
+
+    def __init__(self, sock):
+        self._sock = sock
+
+    def recv(self, num_bytes: int) -> bytes:
+        data = self._sock.recv(num_bytes)
+        if not data:
+            raise ConnectionError("ADARA live stream closed by the server")
+        return data
+
+    def __getattr__(self, name: str):
+        return getattr(self._sock, name)
+
+
 def build_reader(args: argparse.Namespace):
     """Construct the appropriate ADARA reader from parsed arguments."""
     has_file = args.adara_file is not None
@@ -103,7 +138,9 @@ def build_reader(args: argparse.Namespace):
             port = int(port_str)
         except ValueError as exc:
             raise ValueError(f"PORT must be an integer, got: {port_str!r}") from exc
-        return AdaraLiveStreamReader(hostname, port)
+        reader = AdaraLiveStreamReader(hostname, port)
+        reader.buffered_stream.sd = _EofRaisingSocket(reader.buffered_stream.sd)
+        return reader
 
     raise ValueError(
         "No data source specified. Use --adara-file FILE, --nexus-file FILE, or --adara-stream HOSTNAME PORT."
@@ -149,9 +186,11 @@ def accumulate_adara_histogram(  # noqa: C901
 
     for packet in reader.read_generator():
         stats.packet_count += 1
-        # Every packet carries a pulse timestamp, so the time axis advances even on a source
-        # with no RTDL packets. Charge is read from RTDL only, further down.
-        if run_statistics is not None:
+        # Only pulse-bearing packets carry the pulse time. Slow-control and prologue packets
+        # carry the time their device last changed, weeks before the run for some, and
+        # clocking from those offsets the whole run. Event packets are included so the time
+        # axis still advances on a source with no RTDL packets; charge is read from RTDL only.
+        if run_statistics is not None and _packet_format(packet) in ADARA_PULSE_FORMATS:
             timestamp = _packet_timestamp(packet)
             if timestamp is not None:
                 run_statistics.accumulator.observe_time(timestamp)
