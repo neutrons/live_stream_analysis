@@ -20,14 +20,19 @@ method rather than one per source. All outputs go to `notebooks/output/`, which 
 
 ## Data
 
-| Role | Format | Run | ONCat title | Duration | Proton charge | Location |
-| --- | --- | --- | --- | --- | --- | --- |
-| Sample | NeXus | NOM_244114 | Diamond at temperature 299.99 K | 4:48 | 0.40 C | `nexus_files/diamond/NOM_244114.nxs.h5` (3.3 GB) |
-| Sample | ADARA | 244114 | The same run, as streamed by the SMS | 4:48 | 0.40 C | `../nomad-adara-carbon-share/20260619-140639.403016382-run-244114/` (16 files, 3.2 GB) |
-| Background | NeXus | NOM_243710 | MT_6mm_PAC at temperature 300.01 K (empty PAC06 can) | 24:02 | 2.00 C | `nexus_files/mt_pac_can/NOM_243710.nxs.h5` |
-| Background | NeXus | NOM_243711 | MT_6mm_PAC at temperature 299.99 K (empty PAC06 can) | 24:03 | 2.00 C | `nexus_files/mt_pac_can/NOM_243711.nxs.h5` |
-| Normalization | NeXus | NOM_243712 | V_rod at temperature 300.01 K (vanadium rod) | 24:03 | 2.00 C | `nexus_files/vanadium/NOM_243712.nxs.h5` (12 GB) |
-| Calibration | HDF5 | 243451 | NOMAD shifter calibration, 2026-06-09 | | | `tests/data/calibration/NOMAD_243451_2026-06-09_shifter.h5` |
+By default the notebooks use the **tutorial dataset** in `tests/data/tutorial/`: the first part of
+each real run, cut by time, small enough to keep in the repository and to run anywhere in seconds.
+Reduced together, it reproduces the full-data I(Q) to 95.9 %, with every strong diamond peak within
+0.002 1/Å of its full-data position. `tests/data/tutorial/README.md` describes the files, and
+`scripts/tutorial_dataset/README.md` how their sizes were chosen.
+
+| Role | Run (ONCat title) | Tutorial file, in `tests/data/tutorial/` | Full run |
+| --- | --- | --- | --- |
+| Sample, NeXus | NOM_244114 (Diamond at temperature 299.99 K) | `NOM_244114.nxs.h5`: first 0.67 s, 4.8 MB | 4:48, 0.40 C: `nexus_files/diamond/NOM_244114.nxs.h5` (3.3 GB) |
+| Sample, ADARA | 244114, the same run as streamed by the SMS | `m00000001-f00000001-run-244114.adara`: the same 0.67 s, closed by the run's END_RUN, 7.9 MB | 16 files, 3.2 GB, on the carbon NFS share |
+| Background | NOM_243710 (MT_6mm_PAC: empty PAC06 can) | `NOM_243710.nxs.h5`: first 2.5 s, 3.0 MB | 24:02, 2.00 C, plus NOM_243711 (24:03, 2.00 C): `nexus_files/mt_pac_can/` |
+| Normalization | NOM_243712 (V_rod: vanadium rod) | `NOM_243712.nxs.h5`: first 0.5 s, 3.2 MB | 24:03, 2.00 C: `nexus_files/vanadium/NOM_243712.nxs.h5` (12 GB) |
+| Calibration | 243451, 2026-06-09 | `tests/data/calibration/NOMAD_243451_2026-06-09_shifter.h5` | the same file |
 
 The diamond sample is run 244114 (IPTS-37098, 2026-06-19) in both formats: the NeXus file written
 when the run ended, and the ADARA packets the SMS streamed while it ran. The background and
@@ -35,9 +40,11 @@ vanadium are IPTS-37412 standards from 2026-06-12, measured with the same PAC06 
 none were measured during IPTS-37098. The 2026-06-09 calibration is the newest one before either;
 on run 244114 it leaves the diamond peaks a constant 0.28 % low in Q.
 
-Titles, durations and charges are from `oncat-nomad.csv` in the repository root. `nexus_files/`
-sits in the repository root; the carbon share is an NFS mount next to the repository (see the
-"ADARA data on ORC NFS shares" section of `docs/reference.md`).
+To use the full runs, set `FULL_DATA = True` in a Python notebook's setup cell (`FULL_RUN = True`
+in the stream notebooks); each CLI notebook lists the paths to swap in. The full runs need
+`nexus_files/` in the repository root and the carbon NFS share next to it (see the "ADARA data on
+ORC NFS shares" section of `docs/reference.md`). Titles, durations and charges are from
+`oncat-nomad.csv` in the repository root.
 
 ## Running them
 
@@ -69,7 +76,7 @@ The helpers behind this live in `live_stream_analysis.notebook`:
 from live_stream_analysis.notebook import start_analysis
 
 run = start_analysis(
-    nexus_file=["nexus_files/diamond/NOM_244114.nxs.h5"],
+    nexus_file=["tests/data/tutorial/NOM_244114.nxs.h5"],
     histogram_pixel_geometry_csv="notebooks/output/pixel_geometry_calibrated.csv",
     histogram_output_csv="notebooks/output/iq.csv",
 )
@@ -93,14 +100,15 @@ Things to know:
 
 ## Runtimes
 
-Measured on one workstation, reading NeXus from local disk and ADARA from the NFS share:
+On the tutorial dataset every notebook runs in under a minute. On the full runs, measured on one
+workstation reading NeXus from local disk and ADARA from the NFS share:
 
-| Notebook | Data | Time |
+| Notebook | Full data | Time |
 | --- | --- | --- |
 | `01_preparer_*` | 4 GB background + 12 GB vanadium | about 1 minute |
 | `02_analyze_nexus_*` | NOM_244114, 412 M events | about 4 minutes |
 | `03_analyze_adara_file_*` | one 210 MB ADARA file | about 1 minute; up to 6 minutes on a first, uncached NFS read |
-| `04_analyze_adara_stream_*` | two ADARA files (386 MB) | about 4 minutes, longer on a first NFS read |
+| `04_analyze_adara_stream_*` | all 16 ADARA files (3.2 GB) | an estimated half an hour, scaled from a two-file replay |
 
 Reading ADARA from the NFS share is I/O bound: one uncached file took 5 min 55 s of wall time but
 only 45 s of CPU. Copy the files to local disk to go faster.
