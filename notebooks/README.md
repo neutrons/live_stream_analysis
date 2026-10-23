@@ -22,19 +22,22 @@ method rather than one per source. All outputs go to `notebooks/output/`, which 
 
 | Role | Format | Run | ONCat title | Duration | Proton charge | Location |
 | --- | --- | --- | --- | --- | --- | --- |
-| Sample | NeXus | NOM_243708 | Diamond at temperature 300.0 K | 2:44 | 0.23 C | `nexus_files/diamond/NOM_243708.nxs.h5` (1.7 GB) |
-| Sample (optional) | NeXus | NOM_243709 | Diamond at temperature 300.0 K | 26:55 | 2.00 C | `nexus_files/diamond/NOM_243709.nxs.h5` (15.4 GB) |
+| Sample | NeXus | NOM_244114 | Diamond at temperature 299.99 K | 4:48 | 0.40 C | `nexus_files/diamond/NOM_244114.nxs.h5` (3.3 GB) |
+| Sample | ADARA | 244114 | The same run, as streamed by the SMS | 4:48 | 0.40 C | `../nomad-adara-carbon-share/20260619-140639.403016382-run-244114/` (16 files, 3.2 GB) |
 | Background | NeXus | NOM_243710 | MT_6mm_PAC at temperature 300.01 K (empty PAC06 can) | 24:02 | 2.00 C | `nexus_files/mt_pac_can/NOM_243710.nxs.h5` |
 | Background | NeXus | NOM_243711 | MT_6mm_PAC at temperature 299.99 K (empty PAC06 can) | 24:03 | 2.00 C | `nexus_files/mt_pac_can/NOM_243711.nxs.h5` |
 | Normalization | NeXus | NOM_243712 | V_rod at temperature 300.01 K (vanadium rod) | 24:03 | 2.00 C | `nexus_files/vanadium/NOM_243712.nxs.h5` (12 GB) |
-| Sample | ADARA | 244114 | Diamond at temperature 299.99 K | 4:48 | 0.40 C | `../nomad-adara-carbon-share/20260619-140639.403016382-run-244114/` (16 files, 3.2 GB) |
 | Calibration | HDF5 | 243451 | NOMAD shifter calibration, 2026-06-09 | | | `tests/data/calibration/NOMAD_243451_2026-06-09_shifter.h5` |
 
-The NeXus runs are IPTS-37412 (2026-06-12); the ADARA run is IPTS-37098 (2026-06-19). Both diamond
-samples sit in a PAC06 can, so one empty-can background and one vanadium normalization serve both.
+The diamond sample is run 244114 (IPTS-37098, 2026-06-19) in both formats: the NeXus file written
+when the run ended, and the ADARA packets the SMS streamed while it ran. The background and
+vanadium are IPTS-37412 standards from 2026-06-12, measured with the same PAC06 can type, since
+none were measured during IPTS-37098. The 2026-06-09 calibration is the newest one before either;
+on run 244114 it leaves the diamond peaks a constant 0.28 % low in Q.
+
 Titles, durations and charges are from `oncat-nomad.csv` in the repository root. `nexus_files/`
-sits in the repository root; the carbon share is the NFS mount described in the top-level README,
-next to the repository.
+sits in the repository root; the carbon share is an NFS mount next to the repository (see the
+"ADARA data on ORC NFS shares" section of `docs/reference.md`).
 
 ## Running them
 
@@ -66,7 +69,7 @@ The helpers behind this live in `live_stream_analysis.notebook`:
 from live_stream_analysis.notebook import start_analysis
 
 run = start_analysis(
-    nexus_file=["nexus_files/diamond/NOM_243708.nxs.h5"],
+    nexus_file=["nexus_files/diamond/NOM_244114.nxs.h5"],
     histogram_pixel_geometry_csv="notebooks/output/pixel_geometry_calibrated.csv",
     histogram_output_csv="notebooks/output/iq.csv",
 )
@@ -95,7 +98,7 @@ Measured on one workstation, reading NeXus from local disk and ADARA from the NF
 | Notebook | Data | Time |
 | --- | --- | --- |
 | `01_preparer_*` | 4 GB background + 12 GB vanadium | about 1 minute |
-| `02_analyze_nexus_*` | NOM_243708, 232 M events | about 4 minutes |
+| `02_analyze_nexus_*` | NOM_244114, 412 M events | about 4 minutes |
 | `03_analyze_adara_file_*` | one 210 MB ADARA file | about 1 minute; up to 6 minutes on a first, uncached NFS read |
 | `04_analyze_adara_stream_*` | two ADARA files (386 MB) | about 4 minutes, longer on a first NFS read |
 
