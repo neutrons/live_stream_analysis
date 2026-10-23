@@ -42,16 +42,15 @@ uv run live_stream_analysis preparer \
     --calibration-file tests/data/calibration/NOMAD_243451_2026-06-09_shifter.h5 \
     --pixel-geometry-csv pixel_geometry.csv
 uv run live_stream_analysis preparer --mode background \
-    --nexus-file nexus_files/mt_pac_can/NOM_243710.nxs.h5 \
-    --nexus-file nexus_files/mt_pac_can/NOM_243711.nxs.h5 \
+    --nexus-file tests/data/tutorial/NOM_243710.nxs.h5 \
     --reduction-output-csv background.csv --q-max 40
 uv run live_stream_analysis preparer --mode normalization \
-    --nexus-file nexus_files/vanadium/NOM_243712.nxs.h5 \
+    --nexus-file tests/data/tutorial/NOM_243712.nxs.h5 \
     --reduction-output-csv normalization.csv --q-max 40
 
 # 2. Diamond run 244114, with the dashboard in your browser
 uv run live_stream_analysis analyze \
-    --nexus-file nexus_files/diamond/NOM_244114.nxs.h5 \
+    --nexus-file tests/data/tutorial/NOM_244114.nxs.h5 \
     --histogram-pixel-geometry-csv pixel_geometry.csv \
     --histogram-q-max 40 \
     --tof-tick-us 1.0 \
@@ -59,17 +58,23 @@ uv run live_stream_analysis analyze \
     --normalization normalization.csv \
     --histogram-output-csv diamond_iq.csv \
     --statistics-output-csv diamond_statistics.csv \
+    --statistics-sample-interval-seconds 0.02 \
     --live-plot-mode browser \
     --live-plot-keep-open
 ```
 
-To analyze the same run from ADARA instead, swap the source and the TOF unit: use
-`--adara-file FILE` or `--adara-stream HOST PORT` with `--tof-tick-us 0.1`, since ADARA times are
-in 100 ns ticks. NOMAD's live stream is `bl1b-daq1.sns.gov 31415`, from the SNS network.
+To analyze the same run from ADARA instead, swap the source and the TOF unit, since ADARA times
+are in 100 ns ticks: `--adara-file tests/data/tutorial/m00000001-f00000001-run-244114.adara
+--tof-tick-us 0.1`. For a live stream, use `--adara-stream HOST PORT`; NOMAD's is
+`bl1b-daq1.sns.gov 31415`, from the SNS network.
 
-The data in these examples is listed, with where to find it, in the
-[notebooks README](https://github.com/neutrons/live_stream_analysis/blob/main/notebooks/README.md). `live_stream_analysis <command> --help` lists every
-option.
+These run as they are from a fresh clone, on the tutorial dataset in
+[`tests/data/tutorial/`](https://github.com/neutrons/live_stream_analysis/blob/main/tests/data/tutorial/README.md):
+the first seconds of each real run, which reproduce the full-data I(Q) to 95.9 %. The 0.02 s decay
+sampling interval suits those short runs; leave it at the 1 s default for full runs. The
+[notebooks README](https://github.com/neutrons/live_stream_analysis/blob/main/notebooks/README.md)
+lists the full runs and where to find them, and `live_stream_analysis <command> --help` lists
+every option.
 
 ## Walkthrough notebooks
 
