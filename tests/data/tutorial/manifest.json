@@ -1,0 +1,50 @@
+{
+  "NOM_244114.nxs.h5": {
+    "role": "Sample",
+    "source": [
+      "live_stream_analysis/nexus_files/diamond/NOM_244114.nxs.h5"
+    ],
+    "pulses": 40,
+    "events": 955394,
+    "proton_charge_pc": 925667560.0,
+    "duration_s": 0.6666666666666666,
+    "bytes": 4803132,
+    "sha256": "8a6c2e6c8f8cf880e094224a5a2aff854c32f7c65433143e6b58831da2370d0a"
+  },
+  "m00000001-f00000001-run-244114.adara": {
+    "role": "Sample",
+    "source": [
+      "nomad-adara-carbon-share/20260619-140639.403016382-run-244114/m00000001-f00000001-run-244114.adara",
+      "nomad-adara-carbon-share/20260619-140639.403016382-run-244114/m00000001-f00000016-run-244114.adara"
+    ],
+    "pulses": 40,
+    "packets": 678,
+    "duration_s": 0.6666666666666666,
+    "bytes": 7852948,
+    "sha256": "55bca58b8eec47cf9644af0e628997d12392f7acd9170da776f6ea17133428de"
+  },
+  "NOM_243710.nxs.h5": {
+    "role": "Background",
+    "source": [
+      "live_stream_analysis/nexus_files/mt_pac_can/NOM_243710.nxs.h5"
+    ],
+    "pulses": 150,
+    "events": 419749,
+    "proton_charge_pc": 3473296320.0,
+    "duration_s": 2.5,
+    "bytes": 3028628,
+    "sha256": "d1d6300dfbb75e5e4898196cbcd390abf30442ad7d5686be35101c5a0ef43847"
+  },
+  "NOM_243712.nxs.h5": {
+    "role": "Normalization",
+    "source": [
+      "live_stream_analysis/nexus_files/vanadium/NOM_243712.nxs.h5"
+    ],
+    "pulses": 30,
+    "events": 517593,
+    "proton_charge_pc": 693417800.0,
+    "duration_s": 0.5,
+    "bytes": 3224364,
+    "sha256": "21c0f9ba13bf2566818f2f5483105730ae07302bd1dc41770ce6d87b80a70c0c"
+  }
+}
