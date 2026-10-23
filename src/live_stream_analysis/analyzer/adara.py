@@ -24,6 +24,10 @@ LOGGER = logging.getLogger(__name__)
 ADARA_RUN_STATUS_NEW_RUN = 1
 ADARA_RUN_STATUS_END_RUN = 4
 ADARA_BANKED_EVENT_FORMAT = 0x400001
+ADARA_RTDL_FORMAT = 0x100
+ADARA_BEAM_MONITOR_EVENT_FORMAT = 0x400101
+# Packets stamped with the time of the neutron pulse they describe.
+ADARA_PULSE_FORMATS = frozenset({ADARA_RTDL_FORMAT, ADARA_BANKED_EVENT_FORMAT, ADARA_BEAM_MONITOR_EVENT_FORMAT})
 
 
 def _safe_packet_attr(packet, attr: str):
@@ -43,6 +47,16 @@ def _packet_timestamp(packet) -> float | None:
     try:
         return float(getter())
     except Exception:  # noqa: BLE001 - a malformed timestamp is treated as absent
+        return None
+
+
+def _packet_format(packet) -> int | None:
+    getter = getattr(packet, "get_format_int", None)
+    if getter is None:
+        return None
+    try:
+        return int(getter())
+    except Exception:  # noqa: BLE001 - a malformed header is treated as an unknown format
         return None
 
 
@@ -172,9 +186,11 @@ def accumulate_adara_histogram(  # noqa: C901
 
     for packet in reader.read_generator():
         stats.packet_count += 1
-        # Every packet carries a pulse timestamp, so the time axis advances even on a source
-        # with no RTDL packets. Charge is read from RTDL only, further down.
-        if run_statistics is not None:
+        # Only pulse-bearing packets carry the pulse time. Slow-control and prologue packets
+        # carry the time their device last changed, weeks before the run for some, and
+        # clocking from those offsets the whole run. Event packets are included so the time
+        # axis still advances on a source with no RTDL packets; charge is read from RTDL only.
+        if run_statistics is not None and _packet_format(packet) in ADARA_PULSE_FORMATS:
             timestamp = _packet_timestamp(packet)
             if timestamp is not None:
                 run_statistics.accumulator.observe_time(timestamp)
