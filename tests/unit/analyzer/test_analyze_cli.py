@@ -19,7 +19,7 @@ from live_stream_analysis.analyzer.live_plot import compute_relative_uncertainty
 from live_stream_analysis.correction_totals import DURATION_COLUMN, PROTON_CHARGE_COLUMN
 from live_stream_analysis.main import build_parser, main
 from live_stream_analysis.statistics import STATISTICS_CSV_COLUMNS
-from tests.unit.analyzer.adara_fixtures import event_packet, null_packet, rtdl_packet
+from tests.unit.analyzer.adara_fixtures import event_packet, null_packet, rtdl_packet, run_status_packet
 
 
 def _write_adara(tmp_path: Path, *packets: bytes) -> Path:
@@ -821,6 +821,104 @@ class TestAdaraFileCLI:
         assert float(last["Elapsed time (s)"]) == pytest.approx(5.0)
         assert float(last["Proton charge (pC)"]) == pytest.approx(4000.0)
         assert int(last["Histogrammed events"]) == 2
+
+    def test_elapsed_time_ignores_slow_control_packet_timestamps(self, tmp_path: Path):
+        """Only pulse-bearing packets advance the run clock.
+
+        A real run file opens NEW_RUN, then device descriptors stamped when the SMS last
+        configured those devices, weeks earlier for run 244114. Clocking from those put the
+        run's start 2,760,701 s early, so every decay sample reported a month of elapsed time.
+        """
+        path = _write_adara(
+            tmp_path,
+            run_status_packet(run_number=1, run_start=100, status=1, timestamp_s=100),
+            null_packet(format_int=0x800000, timestamp_s=10),  # device descriptor, stale
+            rtdl_packet(timestamp_s=100, charge_10pc=100),
+            event_packet([(1, 1)], timestamp_s=100),
+            null_packet(format_int=0x800200, timestamp_s=20),  # slow-control value, stale
+            rtdl_packet(timestamp_s=105, charge_10pc=300),
+            event_packet([(1, 1)], timestamp_s=105),
+        )
+        pixel_csv = tmp_path / "pixel_geometry.csv"
+        pixel_csv.write_text(
+            "pixel id,L2 value,theta value,TOF-to-Q matrix element\n0,1.0,1.0,0.0\n1,1.0,1.0,99.0\n",
+            encoding="utf-8",
+        )
+        statistics_csv = tmp_path / "statistics.csv"
+
+        assert (
+            main(
+                [
+                    "analyze",
+                    "--adara-file",
+                    str(path),
+                    "--histogram-pixel-geometry-csv",
+                    str(pixel_csv),
+                    "--histogram-q-max",
+                    "100",
+                    "--statistics-output-csv",
+                    str(statistics_csv),
+                ]
+            )
+            == 0
+        )
+
+        rows = list(csv.DictReader(statistics_csv.read_text(encoding="utf-8").splitlines()))
+        elapsed = [float(row["Elapsed time (s)"]) for row in rows]
+        # The clock spans the pulses at 100 s and 105 s, whatever the device packets say.
+        assert elapsed[0] == pytest.approx(0.0)
+        assert max(elapsed) == pytest.approx(5.0)
+        assert elapsed == sorted(elapsed)
+        assert float(rows[-1]["Proton charge (pC)"]) == pytest.approx(4000.0)
+
+    def test_no_decay_sample_before_any_events_with_background_subtraction(self, tmp_path: Path):
+        """With nothing histogrammed yet, the corrected histogram is just minus the background.
+
+        Its relative error is the background's, which is small, so recording it would put a
+        near-perfect point at zero charge at the head of the decay curve: no data reported as
+        excellent data. Real run files open with NEW_RUN, which reports the emptied histogram.
+        """
+        path = _write_adara(
+            tmp_path,
+            run_status_packet(run_number=1, run_start=100, status=1, timestamp_s=100),
+            rtdl_packet(timestamp_s=100, charge_10pc=100),
+            event_packet([(1, 1)], timestamp_s=100),
+            rtdl_packet(timestamp_s=105, charge_10pc=300),
+            event_packet([(1, 1)], timestamp_s=105),
+        )
+        pixel_csv = tmp_path / "pixel_geometry.csv"
+        pixel_csv.write_text(
+            "pixel id,L2 value,theta value,TOF-to-Q matrix element\n0,1.0,1.0,0.0\n1,1.0,1.0,99.0\n",
+            encoding="utf-8",
+        )
+        background_csv = tmp_path / "background.csv"
+        background_csv.write_text("Q value,I(Q),Error I(Q)\n99.01000000,100.00000000,1.00000000\n", encoding="utf-8")
+        statistics_csv = tmp_path / "statistics.csv"
+
+        assert (
+            main(
+                [
+                    "analyze",
+                    "--adara-file",
+                    str(path),
+                    "--histogram-pixel-geometry-csv",
+                    str(pixel_csv),
+                    "--histogram-q-max",
+                    "100",
+                    "--background-subtraction",
+                    str(background_csv),
+                    "--normalize-by",
+                    "none",
+                    "--statistics-output-csv",
+                    str(statistics_csv),
+                ]
+            )
+            == 0
+        )
+
+        rows = list(csv.DictReader(statistics_csv.read_text(encoding="utf-8").splitlines()))
+        assert rows
+        assert all(int(row["Histogrammed events"]) > 0 for row in rows)
 
     def test_histogram_mode_writes_the_2d_statistics_map_csv(self, tmp_path: Path):
         """The 2D map is the q-space decay data the ticket asks to save out."""
