@@ -23,7 +23,7 @@ services:
       - --histogram-q-max
       - "30"
       - --tof-tick-us
-      - "1.0"
+      - "0.1"
       - --background-subtraction
       - background.csv
       - --normalization
@@ -118,7 +118,7 @@ services:
       - --histogram-q-max
       - "30"
       - --tof-tick-us
-      - "1.0"
+      - "0.1"
       - --background-subtraction
       - background.csv
       - --normalization
