@@ -7,6 +7,7 @@ Welcome to live stream analysis docs!
    :caption: Contents:
 
    README
+   reference
 
 =========================================
 Indices and tables

@@ -5,610 +5,102 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-green)](https://opensource.org/licenses/BSD-3-Clause)
 
-Repository for working on live stream analysis
-
-## Walkthrough notebooks
-
-[notebooks/](notebooks/README.md) walks through the whole workflow on NOMAD diamond data:
-`preparer` first, then `analyze` on a NeXus file, an ADARA file, and a live (or replayed) ADARA
-stream. Each step comes as a CLI notebook and a Python-library notebook, and each analyze notebook
-shows the live plot inside the notebook.
-
-## IDF Pre-Processing Helper
-
-The package includes a pure-Python helper CLI subcommand for pre-processing Mantid IDF XML files.
-It generates:
-
-1. Pixel geometry CSV with columns: pixel id, L2 value, theta value, TOF-to-Q matrix element.
-2. Synthetic I(Q) CSV from a TOF-to-Q conversion workflow.
-
-Example:
-
-```bash
-uv run live_stream_analysis preparer \
-    --idf-file tests/data/idf/NOMAD_Definition.xml \
-    --pixel-geometry-csv pixel_geometry.csv \
-    --iq-csv iq.csv
-```
-
-### Generate background and normalization CSVs from NeXus files
-
-The same `preparer` command also reduces event NeXus files into the CSVs used by the
-analyzer for background subtraction and normalization. Alongside `Q value`, `I(Q)`, and
-`Error I(Q)`, each CSV records the total proton charge and duration of the runs it was
-reduced from, so the analyzer can put it on the same per-exposure scale as the sample.
-
-Use `--mode background` to build a background curve:
-
-```bash
-uv run live_stream_analysis preparer \
-    --mode background \
-    --nexus-file nexus_files/mt_pac_can/NOM_243710.nxs.h5 \
-    --nexus-file nexus_files/mt_pac_can/NOM_243711.nxs.h5 \
-    --reduction-output-csv background.csv \
-    --q-min 0.0 \
-    --q-max 30.0
-```
-
-Use `--mode normalization` for vanadium normalization. In this mode the preparer
-applies a smoothing-based peak stripping step so sharp vanadium Bragg peaks are
-replaced by a local baseline before writing the CSV:
-
-```bash
-uv run live_stream_analysis preparer \
-    --mode normalization \
-    --nexus-file nexus_files/vanadium/NOM_243712.nxs.h5 \
-    --reduction-output-csv normalization.csv \
-    --q-min 0.0 \
-    --q-max 30.0
-```
-
-You can tune the vanadium peak stripping with:
-
-1. `--peak-window` for the smoothing window size
-2. `--peak-z-threshold` for the residual threshold used to classify peaks
-
-Example with custom stripping parameters:
-
-```bash
-uv run live_stream_analysis preparer \
-    --mode normalization \
-    --nexus-file nexus_files/vanadium/NOM_243712.nxs.h5 \
-    --reduction-output-csv normalization.csv \
-    --q-min 0.0 \
-    --q-max 30.0 \
-    --peak-window 41 \
-    --peak-z-threshold 2.5
-```
-
-Notes:
-
-1. Repeat `--nexus-file` to combine multiple runs into one reduced CSV. Counts are summed
-   across the runs, matching the summed proton charge and duration.
-2. The output columns are `Q value`, `I(Q)`, `Error I(Q)`, `Proton charge (pC)`, and
-   `Duration (s)`. The last two repeat the same totals, read from each file's
-   `entry/proton_charge` and `entry/duration`, on every row. A total is left blank if any
-   input file lacks it.
-3. The current preparer reduction path uses a fixed `q_bin_size` of `0.02` and `tof_tick_us` of `1.0`.
-
-### Optional: apply Mantid diffraction calibration
-
-You can optionally pass a Mantid Diffraction Calibration HDF5 file (`SaveDiffCal` format)
-to generate a calibration-aware pixel geometry CSV.
-
-When `--calibration-file` is supplied, the pixel geometry CSV adds these columns:
-
-1. `difc`
-2. `difa`
-3. `tzero`
-4. `use`
-
-The analyzer will use these values for TOF+pixel to Q conversion via:
-
-1. `TOF = DIFA*d^2 + DIFC*d + TZERO`
-2. `Q = 2*pi/d`
-
-and it treats `use=0` as masked (detector excluded from histogramming).
-
-Example with one of the provided calibration files:
-
-```bash
-uv run live_stream_analysis preparer \
-    --idf-file tests/data/idf/NOMAD_Definition.xml \
-    --calibration-file tests/data/calibration/NOMAD_243451_2026-06-09_shifter.h5 \
-    --pixel-geometry-csv pixel_geometry_calibrated.csv \
-    --iq-csv iq.csv
-```
-
-Then use the calibrated geometry directly in analyzer:
-
-```bash
-uv run live_stream_analysis analyze \
-    --adara-file /path/to/file.adara \
-    --histogram-pixel-geometry-csv pixel_geometry_calibrated.csv \
-    --histogram-q-min 0.6 \
-    --histogram-q-bin-size 0.02 \
-    --histogram-q-max 100 \
-    --tof-tick-us 1.0 \
-    --histogram-output-csv sample_histogram.csv
-```
-
-For ADARA histogram workflows where TOF ticks are 0.1 microseconds, pre-scale the
-TOF-to-Q matrix element by 10 during CSV generation:
-
-```bash
-uv run live_stream_analysis preparer \
-    --idf-file tests/data/idf/NOMAD_Definition.xml \
-    --pixel-geometry-csv pixel_geometry.csv \
-    --iq-csv iq.csv \
-    --q-matrix-scale 10
-```
-
-Then run histogram analysis from an ADARA file (or use `--adara-stream HOST PORT`):
-
-```bash
-uv run live_stream_analysis analyze \
-    --adara-file /path/to/file.adara \
-    --histogram-pixel-geometry-csv pixel_geometry.csv \
-    --histogram-q-min 0.6 \
-    --histogram-q-bin-size 0.02 \
-    --histogram-q-max 100 \
-    --tof-tick-us 1.0 \
-    --histogram-output-csv sample_histogram.csv
-```
-
-### ADARA run status handling
-
-The analyzer inspects ADARA run-status packets while accumulating events. The
-status codes used by the upstream ADARA protocol are:
-
-1. `0`: `NO_RUN`
-2. `1`: `NEW_RUN`
-3. `2`: `RUN_EOF`
-4. `3`: `RUN_BOF`
-5. `4`: `END_RUN`
-6. `5`: `STATE`
-7. `6`: `PROLOGUE`
-
-For live-stream-analysis, the important distinction is that `END_RUN` is the
-explicit end-of-run signal. `RUN_EOF` is only end-of-file for the current ADARA
-file segment and does not mean the run is complete.
-
-Current analyzer behavior is:
-
-1. Keep histogramming events normally across packets.
-2. When a run-status packet with `status == 4` (`END_RUN`) arrives, finalize the
-    current histogram immediately.
-3. Apply background subtraction and normalization to that completed run, and write it to
-    `--histogram-output-csv`. A live stream only stops when interrupted, so this is the write
-    that leaves each completed run on disk.
-4. Publish the final corrected histogram snapshot and the INTERSECT
-    `run_completed` event when INTERSECT mode is enabled.
-5. Reset the in-memory histogram buffer to zeros so subsequent packets start a
-    fresh histogram for the next run.
-
-At process shutdown, if there is still an active histogram with data that has
-not yet seen an explicit `END_RUN`, the analyzer still finalizes and publishes
-that trailing histogram once before exit.
-
-For a full local example with background subtraction, normalization, live plotting,
-and progress logging enabled:
-
-```bash
-uv run live_stream_analysis analyze \
-    --adara-file adara_mount/20250201/adara_streams/NOMAD.Raw.Data.Runs.208511-208543/20250131-101613.350178410-run-208511/m00000001-f00000001-run-208511.adara \
-    --histogram-pixel-geometry-csv pixel_geometry.csv \
-    --histogram-q-bin-size 0.02 \
-    --histogram-q-max 30 \
-    --tof-tick-us 1.0 \
-    --background-subtraction background.csv \
-    --normalization normalization.csv \
-    --histogram-output-csv analyze_histogram.csv \
-
-    --live-plot-mode desktop \
-    --live-plot-refresh-every 1000 \
-    --log-level INFO \
-    --event-log-interval 100000
-```
-
-For Docker, use browser live plot mode instead of desktop mode so the plot is visible from the host browser:
-
-```bash
-docker build -t live-stream-analysis .
-docker run --rm -p 8000:8000 -v "$PWD":/work -w /work live-stream-analysis \
-    live_stream_analysis analyze \
-    --adara-file adara_mount/20250201/adara_streams/NOMAD.Raw.Data.Runs.208511-208543/20250131-101613.350178410-run-208511/m00000001-f00000001-run-208511.adara \
-    --histogram-pixel-geometry-csv pixel_geometry.csv \
-    --histogram-q-bin-size 0.02 \
-    --histogram-q-max 30 \
-    --tof-tick-us 1.0 \
-    --background-subtraction background.csv \
-    --normalization normalization.csv \
-    --histogram-output-csv analyze_histogram.csv \
-    --live-plot-mode browser \
-    --live-plot-host 0.0.0.0 \
-    --live-plot-port 8000 \
-    --live-plot-no-open-browser \
-    --live-plot-refresh-every 1000 \
-    --log-level INFO \
-    --event-log-interval 100000
-```
-
-Then open `http://localhost:8000` in your browser.
-
-If you prefer Docker Compose, the repository includes [docker-compose.yml](/home/ntm/projects/illumine/live_stream_analysis/docker-compose.yml):
-
-```bash
-docker compose --profile adara-file up --build
-```
-
-That starts the ADARA file browser live-plot workflow and publishes it on `http://localhost:8000`.
-Because the compose file now uses profiles, `docker compose up` by itself will not start any of the three analysis services.
-
-The browser page now includes a small status panel with live plot update count, total counts,
-nonzero bins, peak intensity, mean relative uncertainty, elapsed time, and integrated proton
-charge so you can see progress at a glance.
-
-### Error decay statistics and normalization by time / proton charge
-
-The analyzer records how the error in q-space decays as time and proton charge accumulate.
-That series is what a downstream service needs in order to forecast how long a run must keep
-going to reach a target error. Proton charge and pulse time are read from ADARA RTDL packets on
-the live stream; for NeXus replays they are attributed from the run-level `entry/duration` and
-`entry/proton_charge` totals in proportion to the events processed so far.
-
-Histograms are normalized by integrated proton charge by default, since that is the quantity
-runs are actually counted against. Pass `--normalize-by none` for raw counts.
-
-Background and normalization CSVs from the preparer are normalized by their own recorded
-totals, so the corrected histogram is
-
-```text
-I(Q) = (S / Q_sample - B / Q_background) / (V / Q_normalization)
-```
-
-where each `Q` is the proton charge (or, with `--normalize-by time`, the duration) of that
-measurement. A background measured for twice as long as the sample is then subtracted at half
-weight rather than in full. A correction CSV without these columns, such as one written by an
-older preparer, keeps the earlier behaviour: the background is subtracted on the sample's
-scale and the normalization is used as-is. The analyzer logs a warning at startup when that
-happens.
-
-The live plot (desktop and browser) shows this same corrected, normalized I(Q) on every
-refresh, using the charge or time accumulated up to that packet or chunk. For a steady
-source, I(Q) therefore holds roughly constant through the run while its error bars shrink,
-rather than climbing with the raw counts. The same totals are read from CSVs sent through the INTERSECT `set_background` and
-`set_normalization` messages.
-
-```bash
-uv run live_stream_analysis analyze \
-    --adara-stream bl1b-daq1.sns.gov 31415 \
-    --histogram-pixel-geometry-csv pixel_geometry.csv \
-    --histogram-q-bin-size 0.02 \
-    --histogram-q-max 30 \
-    --statistics-output-csv statistics.csv \
-    --statistics-q-min 1.0 \
-    --statistics-q-max 10.0 \
-    --statistics-sample-interval-seconds 5 \
-    --live-plot-mode browser
-```
-
-| Option | Purpose |
-| --- | --- |
-| `--normalize-by {proton-charge,time,none}` | Divide the sample by its integrated proton charge or accumulated run time, and each correction by its recorded total. Default `proton-charge`. Counts and corrections stay unscaled until the chosen quantity starts accumulating, and when the source reports neither, so a file without charge still yields raw counts. Pass `none` to opt out. |
-| `--statistics-output-csv FILE` | Write the decay series with columns `Elapsed time (s)`, `Proton charge (pC)`, `Mean sigma/I(Q)`, `Total counts`, `Nonzero bins`, `Histogrammed events`. |
-| `--statistics-map-output-csv FILE` | Write the 2D map: one row per sample, one column per Q in the window, prefixed by elapsed time and proton charge. |
-| `--statistics-q-min` / `--statistics-q-max` | Restrict the statistics to a Q window. Defaults to every populated bin. This window is also the Q extent of the 2D map. |
-| `--statistics-sample-interval-seconds` | Minimum accumulated run time between samples. Default `1.0`. |
-| `--statistics-x-axis {time,proton-charge}` | Independent variable for the desktop error-decay panel. Default `proton-charge`; the browser plot toggles between both without restarting. |
-
-Both live plots gain an **Error Decay** panel, and each INTERSECT `histogram_updated` event now
-carries `elapsed_seconds`, `proton_charge_pc`, and `mean_relative_uncertainty` so subscribers can
-accumulate the same curve without reading the CSV.
-
-#### 1D and 2D views
-
-The Error Decay panel has two views, toggled with a button in both the browser page and the
-desktop window:
-
-- **1D trend** — mean sigma/I(Q) against elapsed time or proton charge. Tells you *when* the run
-  converges.
-- **2D map** — Q across the bottom, elapsed time or proton charge up the side, and sigma/I(Q) as a
-  viridis colour. Tells you *which part of q-space* is still noisy, which the mean hides. The
-  colour scale is logarithmic by default (the error typically spans more than two decades) and
-  toggles to linear.
-
-Restricting the Q window makes the map far more useful, since it is the map's x extent:
-
-```bash
-uv run live_stream_analysis analyze \
-    --adara-stream bl1b-daq1.sns.gov 31415 \
-    --histogram-pixel-geometry-csv pixel_geometry.csv \
-    --statistics-q-min 15.0 \
-    --statistics-q-max 20.0 \
-    --statistics-map-output-csv statistics_map.csv \
-    --live-plot-mode browser
-```
-
-Two details worth knowing about the map's resolution. Adjacent Q bins are **averaged** into at
-most 256 columns when a sample is recorded, which bounds memory over a long run; a 5-wide window
-at the default 0.02 bin size is 250 bins and so comes through at full resolution. Rows, by
-contrast, are **selected** rather than averaged when there are more than 256 samples: each row is
-a snapshot at one accumulation level, so blending two would report a measurement that never
-happened. The browser fetches the map from its own `/statistics-map` endpoint, only while the 2D
-view is open, to keep the twice-a-second `/state` poll small.
-
-Because each sample now carries a full profile, the series bounds itself: past 4096 samples it
-drops every other one and doubles the effective sampling interval, so a live stream that runs for
-hours without a run boundary does not grow without limit. Thinning keeps the whole span rather
-than discarding the start of the run, since the steep early decay is the most informative part of
-the curve for a forecast.
-
-Without corrections, sigma/I(Q) is unchanged by `--normalize-by`, since normalization scales the
-intensity and its uncertainty by the same divisor. The decay curve is therefore the same whether
-or not normalization is enabled. With a background that carries its own totals, the background is
-re-weighted against the sample, so sigma/I(Q) shifts accordingly.
-
-The same `analyze` command also accepts event NeXus sample inputs. Repeat
-`--nexus-file` to combine multiple sample runs while keeping the same histogram,
-background-subtraction, normalization, and CSV output path:
-
-```bash
-uv run live_stream_analysis analyze \
-    --nexus-file nexus_files/diamond/NOM_243708.nxs.h5 \
-    --nexus-file nexus_files/diamond/NOM_243709.nxs.h5 \
-    --histogram-pixel-geometry-csv pixel_geometry.csv \
-    --histogram-q-min 0.6 \
-    --histogram-q-bin-size 0.02 \
-    --histogram-q-max 30 \
-    --tof-tick-us 1.0 \
-    --background-subtraction background.csv \
-    --normalization normalization.csv \
-    --histogram-output-csv analyze_histogram.csv
-```
-
-For a browser live-plot version of the same two-file NeXus workflow in Docker Compose:
-
-```bash
-docker compose --profile nexus up --build
-```
-
-That publishes the NeXus browser plot on `http://localhost:8001`.
-
-For a browser live-plot workflow against the default NOMAD live ADARA stream endpoint:
-
-```bash
-docker compose --profile adara-stream up --build
-```
-
-That service defaults to `--adara-stream bl1b-daq1.sns.gov 31415` and publishes the browser plot on `http://localhost:8002`.
-It requires DNS/network access to the SNS endpoint, so use the SNS network or VPN when running it.
-
-## INTERSECT Mode
-
-The analyzer can publish INTERSECT events over RabbitMQ/AMQP for two cases:
-
-1. Periodic histogram snapshots containing `q`, `intensity`, and `error`
-2. A run-complete event containing `instrument`, `ipts` when available, and `run_number`
-
-Install the project dependencies with:
+Live reduction of neutron diffraction data from [NOMAD](https://neutrons.ornl.gov/nomad) at the
+Spallation Neutron Source: turn events into a corrected I(Q) while the run is still counting, and
+track how fast its uncertainty falls.
+
+![The live dashboard for diamond run 244114: corrected I(Q), relative uncertainty per Q bin, and the error decay against proton charge](docs/images/live-plot-dashboard.png)
+
+- **Three sources, one pipeline:** a live ADARA stream from the beamline, a recorded ADARA file,
+  or a completed event NeXus file.
+- **Corrected as it accumulates:** each event is converted to Q with a calibrated pixel
+  geometry, then background-subtracted and vanadium-normalized, each scaled by its own proton
+  charge.
+- **Live dashboard:** I(Q), σ/I(Q) per bin and run totals in the browser, refreshing as data
+  arrives.
+- **Error decay for forecasting:** σ/I(Q) against charge and time, published over
+  INTERSECT so a separate service can forecast when a run
+  will reach its target error.
+
+## How it works
+
+Two subcommands, run in order:
+
+| Step | Command | Reads | Writes |
+| --- | --- | --- | --- |
+| 1. Prepare, once per setup | `live_stream_analysis preparer` | Instrument definition, calibration, empty-can and vanadium NeXus runs | Pixel geometry, background and normalization CSVs |
+| 2. Analyze, per sample | `live_stream_analysis analyze` | The sample (stream, ADARA file or NeXus) plus the step 1 CSVs | Corrected I(Q) and error-decay CSVs, the dashboard, INTERSECT events |
+
+## Quick start
 
 ```bash
 uv sync
-```
 
-The example configuration is in [configs/intersect.example.yaml](/home/ntm/projects/illumine/live_stream_analysis/configs/intersect.example.yaml). The default publish interval is 5 seconds.
+# 1. Pixel geometry, background (empty PAC06 can) and normalization (vanadium rod)
+uv run live_stream_analysis preparer \
+    --idf-file tests/data/idf/NOMAD_Definition.xml \
+    --calibration-file tests/data/calibration/NOMAD_243451_2026-06-09_shifter.h5 \
+    --pixel-geometry-csv pixel_geometry.csv
+uv run live_stream_analysis preparer --mode background \
+    --nexus-file nexus_files/mt_pac_can/NOM_243710.nxs.h5 \
+    --nexus-file nexus_files/mt_pac_can/NOM_243711.nxs.h5 \
+    --reduction-output-csv background.csv --q-max 40
+uv run live_stream_analysis preparer --mode normalization \
+    --nexus-file nexus_files/vanadium/NOM_243712.nxs.h5 \
+    --reduction-output-csv normalization.csv --q-max 40
 
-To enable publishing during analysis:
-
-```bash
+# 2. Diamond run 244114, with the dashboard in your browser
 uv run live_stream_analysis analyze \
-    --adara-file /path/to/file.adara \
+    --nexus-file nexus_files/diamond/NOM_244114.nxs.h5 \
     --histogram-pixel-geometry-csv pixel_geometry.csv \
-    --histogram-q-min 0.6 \
-    --histogram-q-bin-size 0.02 \
-    --histogram-q-max 30 \
+    --histogram-q-max 40 \
     --tof-tick-us 1.0 \
-    --enable-intersect \
-    --intersect-config configs/intersect.example.yaml
+    --background-subtraction background.csv \
+    --normalization normalization.csv \
+    --histogram-output-csv diamond_iq.csv \
+    --statistics-output-csv diamond_statistics.csv \
+    --live-plot-mode browser \
+    --live-plot-keep-open
 ```
 
-To run the one-off listener client that subscribes to both INTERSECT events:
+To analyze the same run from ADARA instead, swap the source and the TOF unit: use
+`--adara-file FILE` or `--adara-stream HOST PORT` with `--tof-tick-us 0.1`, since ADARA times are
+in 100 ns ticks. NOMAD's live stream is `bl1b-daq1.sns.gov 31415`, from the SNS network.
+
+The data in these examples is listed, with where to find it, in the
+[notebooks README](https://github.com/neutrons/live_stream_analysis/blob/main/notebooks/README.md). `live_stream_analysis <command> --help` lists every
+option.
+
+## Walkthrough notebooks
+
+[`notebooks/`](https://github.com/neutrons/live_stream_analysis/blob/main/notebooks/README.md) runs the whole workflow on diamond run 244114, as CLI
+commands and as Python-library calls, with the live dashboard shown inside the notebook:
+
+| Notebooks | Step |
+| --- | --- |
+| `01_preparer_{cli,python}` | Pixel geometry, background and normalization |
+| `02_analyze_nexus_{cli,python}` | Analyze the NeXus file |
+| `03_analyze_adara_file_{cli,python}` | Analyze a recorded ADARA file |
+| `04_analyze_adara_stream_{cli,python}` | Analyze an ADARA stream: a local replay, or NOMAD itself |
+
+## More
+
+- [Reference](docs/reference.md): TOF units, the correction formula, run handling on the ADARA
+  path, error-decay statistics, INTERSECT, Docker, plotting, and the NFS shares with recorded
+  ADARA data.
+- [`scripts/live_comparison/`](https://github.com/neutrons/live_stream_analysis/blob/main/scripts/live_comparison/README.md): comparison against Mantid, a
+  diamond peak-position check, and an ADARA replay server for exercising the live path without
+  beam.
+
+## Development
 
 ```bash
-uv run live_stream_analysis intersect-listen \
-    --intersect-config configs/intersect.example.yaml
+uv sync                               # default dev and test dependencies
+uv run pytest                         # tests
+uv run pre-commit run --all-files     # lint and format checks, as in CI
+uv sync --group jupyter               # notebooks; also --group docs, --group package
 ```
 
-For a local RabbitMQ + MinIO + analyzer + listener stack:
+## License
 
-```bash
-docker compose -f docker-compose.intersect.yml --profile intersect --profile adara-file --profile listener up --build
-```
-
-RabbitMQ management is exposed on `http://localhost:15672` and MinIO console on `http://localhost:9001`.
-
-Available profiles are:
-
-1. `adara-file` for the mounted ADARA file example on port `8000`
-2. `nexus` for the two-file NeXus example on port `8001`
-3. `adara-stream` for the live NOMAD stream example on port `8002`
-
-To run the same analysis inside Docker, mount the directory that contains your
-ADARA file, pixel geometry CSV, and desired output path into the container.
-From the repository root, this works with the current image:
-
-```bash
-docker build -t live-stream-analysis .
-docker run --rm -v "$PWD":/work -w /work live-stream-analysis \
-    live_stream_analysis analyze \
-    --adara-file adara_mount/20250201/adara_streams/NOMAD.Raw.Data.Runs.208511-208543/20250131-101613.350178410-run-208511/m00000001-f00000001-run-208511.adara \
-    --histogram-pixel-geometry-csv pixel_geometry.csv \
-    --histogram-q-min 0.6 \
-    --histogram-q-bin-size 0.02 \
-    --histogram-q-max 30 \
-    --tof-tick-us 1.0 \
-    --histogram-output-csv sample_histogram.csv
-```
-
-Without the `-v "$PWD":/work -w /work` mount, the container cannot see files
-from your host filesystem, so relative paths like `adara_mount/...` will fail.
-
-To inspect the generated histogram CSV interactively, install the optional plotting
-dependencies and run:
-
-```bash
-uv sync --group jupyter
-uv run --group jupyter python scripts/plot_csv_histogram.py sample_histogram.csv
-```
-
-If you also want to save the current view to disk, add `--output-png`:
-
-```bash
-uv run --group jupyter python scripts/plot_csv_histogram.py sample_histogram.csv --output-png sample_histogram.png
-```
-
-To inspect whether the propagated uncertainty looks reasonable, add a second panel
-showing relative uncertainty, `sigma / I(Q)`:
-
-```bash
-uv run --group jupyter python scripts/plot_csv_histogram.py corrected_histogram.csv --show-relative-uncertainty
-```
-
-If the corrected signal is close to zero in part of the range, the relative
-uncertainty can spike and dominate the panel. To focus on bins with a more
-stable denominator, mask points where `|I(Q)|` is too small:
-
-```bash
-uv run --group jupyter python scripts/plot_csv_histogram.py \
-    corrected_histogram.csv \
-    --show-relative-uncertainty \
-    --relative-uncertainty-min-abs-intensity 2.0
-```
-
-To compare sample, background, normalization, and corrected outputs on one figure,
-either overlay them:
-
-```bash
-uv run --group jupyter python scripts/plot_csv_histogram.py \
-    --input sample_histogram.csv \
-    --input background.csv \
-    --input normalization.csv \
-    --input corrected_histogram.csv \
-    --label Sample \
-    --label Background \
-    --label Normalization \
-    --label Corrected \
-    --mode overlay
-```
-
-or split them into stacked subplots when the scales differ too much:
-
-```bash
-uv run --group jupyter python scripts/plot_csv_histogram.py \
-    --input sample_histogram.csv \
-    --input background.csv \
-    --input normalization.csv \
-    --input corrected_histogram.csv \
-    --label Sample \
-    --label Background \
-    --label Normalization \
-    --label Corrected \
-    --mode subplots
-```
-
-For the low-Q diagnostic view, it is often useful to combine both ideas:
-overlay the curves, zoom into the low-Q region, and mask unstable relative
-uncertainty bins where the corrected intensity is nearly zero:
-
-```bash
-uv run --group jupyter python scripts/plot_csv_histogram.py \
-    --input sample_histogram.csv \
-    --input background.csv \
-    --input normalization.csv \
-    --input corrected_histogram.csv \
-    --label Sample \
-    --label Background \
-    --label Normalization \
-    --label Corrected \
-    --mode overlay \
-    --x-max 1.5 \
-    --show-relative-uncertainty \
-    --relative-uncertainty-min-abs-intensity 2.0 \
-    --error-alpha 0.12
-```
-
-The plotting script uses Q on the x-axis and includes shaded error bands by default.
-Use `--x-min`, `--x-max`, `--hide-error-band`, `--error-alpha`,
-`--show-relative-uncertainty`, or `--relative-uncertainty-min-abs-intensity`
-to simplify or diagnose the view when needed.
-
-If you use an unscaled pixel geometry CSV, set `--tof-tick-us 0.1` instead.
-
-Note: current parser coverage is validated for NOMAD IDF fixtures. A POWGEN fixture is included in tests for parser study/regression coverage.
-
-# Accessing Adara streams for NOMAD Fe2O3 (Linux)
-
-If you want to use the ORC Shares NFS, you can:
-  A.1. Go into "Share" tab, create share w/ "NFS" share type + sub-type of "Perf-NFS" and pick the amount of storage (I did all 300GB available)
-  A.2. After it is created, add a "Rule" to share; I did "ip" and just let it be "0.0.0.0/0" for all IP to mount it (note: 0.0.0.0 won't work, the "/0" is required but UI doesn't tell you)
-  A.3. Click on the Share in the UI and make note / copy  the "Path" w/ an IP address/path format (edited) 
-
-Then, on a server (either an existing one or creating one; I created one and used Ubuntu 24.04):
-  B.1. Add tools via `sudo apt install nfs-common` to mount NFS
-  B.2. Create a directory i.e. /path_for_mount
-  B.3. Mount the share via `sudo mount -t nfs <share path from (A.3) above> <path for mount in step (B.2) above>
-
-Then if everything worked, you can add files to the mount!
-We tested via then mounting the share using step B.3 to my laptop and read the files I made using the share on the server above
-
-Then, you can use the [readadara](https://github.com/bsobhani/readadara) package by Alex Sohbani:
-```
-uv run python
-```
-...and then
-```
-from readadara import AdaraFileReader
-
-# This will be path in B.2 above and then the `adara_streams/...` path for files on the NFS share
-filename = "/path_for_mount/adara_streams/NOMAD.Raw.Data.Runs.208511-208543/20250131-101613.350178410-run-208511/m00000001-f00000001-run-208511.adara")
-reader = AdaraFileReader(filename)
-for packet in reader.read_generator()
-    print(packet.to_dict())
-```
-
-## Development environment setup
-
-### Build development environment
-
-1. Install `uv` from the [official docs](https://docs.astral.sh/uv/getting-started/installation/).
-1. Create/update the local environment with `uv sync`.
-1. Run tests with `uv run pytest`.
-1. For docs, include the docs dependency group: `uv sync --group docs`.
-1. For packaging checks, include the package group: `uv sync --group package`.
-
-## UV
-
-This project uses uv for lockfile management and development environments, with `pyproject.toml` as the source of truth for dependencies and packaging.
-
-### How to use UV
-
-1. Install `uv` by following the [official documentation](https://docs.astral.sh/uv/getting-started/installation/).
-1. Run `uv sync` to install default development and test dependencies.
-1. Run commands in the project environment with `uv run ...`.
-1. Include optional groups as needed:
-   1. `uv sync --group docs` for documentation tooling.
-   1. `uv sync --group package` for build/twine tooling.
-   1. `uv sync --group jupyter` for notebook tooling.
-
-    ```bash
-    uv sync
-    uv run pytest
-    uv run live_stream_analysis --help
-    ```
-# NFS shares
-
-| Experiment         | stream size | remote                                                    | local directory          | command     |
-|--------------------|-------------|-----------------------------------------------------------|--------------------------|-------------|
-| Fe2O3 - May 2025   | 300 GiB     | 10.64.135.253:/share_66aaa9bb_61c7_4f12_964e_7c14f30e2ad3 | nomad-adara-fe2o3-share  | sudo mount -t nfs 10.64.135.253:/share_66aaa9bb_61c7_4f12_964e_7c14f30e2ad3 ./nomad-adara-fe2o3-share |
-| Carbon - June 2026 | 1,100 GiB   | 10.64.135.253:/share_8b4e51ef_ab6f_4c13_a35e_d9bbeb751e39 | nomad-adara-carbon-share | sudo mount -t nfs 10.64.135.253:/share_8b4e51ef_ab6f_4c13_a35e_d9bbeb751e39 ./nomad-adara-carbon-share |
+BSD 3-Clause; see [LICENSE](https://github.com/neutrons/live_stream_analysis/blob/main/LICENSE).
