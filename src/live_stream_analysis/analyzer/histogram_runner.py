@@ -169,6 +169,11 @@ class _HistogramSession:
         series = self.runtime_state.run_statistics.series
         if not force and not series.is_due(accumulator.elapsed_seconds):
             return
+        if not any(hist):
+            # Nothing histogrammed yet, e.g. the emptied histogram a NEW_RUN reports. With a
+            # background, the corrected values are then just minus the background, whose small
+            # relative error would read as a near-perfect point at the head of the decay curve.
+            return
 
         intensity, error = self.corrected(hist)
         relative_uncertainty = compute_relative_uncertainty(intensity, error)
