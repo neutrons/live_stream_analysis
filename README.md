@@ -31,25 +31,40 @@ Two subcommands, run in order:
 | 1. Prepare, once per setup | `live_stream_analysis preparer` | Instrument definition, calibration, empty-can and vanadium NeXus runs | Pixel geometry, background and normalization CSVs |
 | 2. Analyze, per sample | `live_stream_analysis analyze` | The sample (stream, ADARA file or NeXus) plus the step 1 CSVs | Corrected I(Q) and error-decay CSVs, the dashboard, INTERSECT events |
 
+## Installation
+
+From a clone of the repository, which also holds the tutorial data the examples use, in a Python
+3.10+ virtual environment:
+
+```bash
+git clone https://github.com/neutrons/live_stream_analysis.git
+cd live_stream_analysis
+python3 -m venv env
+source env/bin/activate            # on Windows: env\Scripts\activate
+python -m pip install -e .
+```
+
+Add `jupyterlab` to the `pip install` to run the walkthrough notebooks. Developers use
+[uv](https://docs.astral.sh/uv/) instead, which installs the locked versions: `uv sync`, then
+prefix commands with `uv run` (see Development, below).
+
 ## Quick start
 
 ```bash
-uv sync
-
 # 1. Pixel geometry, background (empty PAC06 can) and normalization (vanadium rod)
-uv run live_stream_analysis preparer \
+live_stream_analysis preparer \
     --idf-file tests/data/idf/NOMAD_Definition.xml \
     --calibration-file tests/data/calibration/NOMAD_243451_2026-06-09_shifter.h5 \
     --pixel-geometry-csv pixel_geometry.csv
-uv run live_stream_analysis preparer --mode background \
+live_stream_analysis preparer --mode background \
     --nexus-file tests/data/tutorial/NOM_243710.nxs.h5 \
     --reduction-output-csv background.csv --q-max 40
-uv run live_stream_analysis preparer --mode normalization \
+live_stream_analysis preparer --mode normalization \
     --nexus-file tests/data/tutorial/NOM_243712.nxs.h5 \
     --reduction-output-csv normalization.csv --q-max 40
 
 # 2. Diamond run 244114, with the dashboard in your browser
-uv run live_stream_analysis analyze \
+live_stream_analysis analyze \
     --nexus-file tests/data/tutorial/NOM_244114.nxs.h5 \
     --histogram-pixel-geometry-csv pixel_geometry.csv \
     --histogram-q-max 40 \

@@ -46,18 +46,47 @@ in the stream notebooks); each CLI notebook lists the paths to swap in. The full
 ORC NFS shares" section of `docs/reference.md`). Titles, durations and charges are from
 `oncat-nomad.csv` in the repository root.
 
-## Running them
+## Installing
 
-From the repository root:
+The notebooks need the repository, for its tutorial data, and a Python environment (3.10 or newer)
+with `live_stream_analysis` and Jupyter installed. With Python's own `venv` and `pip`:
+
+```bash
+git clone https://github.com/neutrons/live_stream_analysis.git
+cd live_stream_analysis
+python3 -m venv env
+source env/bin/activate            # on Windows: env\Scripts\activate
+python -m pip install --upgrade pip
+python -m pip install -e . jupyterlab
+```
+
+`-e` installs the package from your clone, so a `git pull` updates it too. Then, with the
+environment still activated:
+
+```bash
+jupyter lab notebooks/
+```
+
+In VS Code, open a notebook and pick the `env` interpreter as its kernel.
+
+### With uv
+
+[uv](https://docs.astral.sh/uv/) is what the project's developers and CI use. It installs the
+exact versions in `uv.lock` into `.venv`:
 
 ```bash
 uv sync --group jupyter
 uv run --group jupyter jupyter lab notebooks/
 ```
 
-In VS Code, open a notebook and pick the repository's `.venv` as the kernel, after running
-`uv sync --group jupyter` once. Keep passing `--group jupyter` to `uv run` and `uv sync`: without
-it, uv syncs back to the default groups and removes the Jupyter packages.
+Keep passing `--group jupyter` to `uv run` and `uv sync`: without it, uv syncs back to the default
+groups and removes the Jupyter packages. In VS Code, pick `.venv` as the kernel.
+
+## Running them
+
+Run `01_preparer_cli` or `01_preparer_python` first; the analyze notebooks read what it writes to
+`notebooks/output/`. Each notebook's first code cell checks the environment and stops with
+instructions if `live_stream_analysis` is not installed for its kernel.
 
 The committed notebooks include outputs from one run, so you can read them without running
 anything. The embedded live plot is the exception: it only shows while its analyzer is running.
