@@ -410,9 +410,20 @@ entry above and a `TEST_LIVE` facility setting, which were not configured here. 
 `StartLiveData` call as a starting point. `mantid_iq_from_nexus.py` and `compare_iq.py` have
 both been run against real data.
 
-## A caveat about the sample data
+## ADARA vs NeXus on the same run
 
-The ADARA files under `adara_mount/` are runs 208511-208629 (Feb 2025); the NeXus files under
-`nexus_files/` are runs 243708-243712 (June 2026). No run is present in both formats, so an
-ADARA-vs-NeXus comparison of the same run is not possible with the data checked out here. The
-NeXus comparison is still meaningful because both source paths share `pixel_tof_to_q`.
+Diamond run 244114 (IPTS-37098, 2026-06-19) exists in both formats: `nexus_files/diamond/NOM_244114.nxs.h5`
+and the ADARA run directory on the carbon NFS share. Reducing both with the 2026-06-09 calibrated
+geometry and no corrections, NeXus with `--tof-tick-us 1.0` and ADARA with `--tof-tick-us 0.1`:
+
+| Check | NeXus (412 M events) | ADARA first file (26 M events) |
+| --- | --- | --- |
+| Mean dQ against the diamond lattice, 21 reflections | -0.0360 1/A | -0.0349 1/A |
+| Peak centres, ADARA minus NeXus, 11 strong peaks | | mean +0.0006 1/A, max 0.0015 1/A |
+| Relative RMS shape difference, Q 1-20 | | 1.3 % |
+
+The two paths put every peak in the same place, to under a tenth of a 0.02 bin. The constant
+-0.28 % offset that both share is the calibration, which predates this run by ten days. The 1.3 %
+shape difference is about three times what counting noise alone predicts (0.4 %). The ADARA file
+covers only the first 18 s of the 288 s run, so it may reflect a change over the run rather than
+a difference between the two paths; it has not been run down.

@@ -1,0 +1,70 @@
+{
+  "fits": {
+    "nexus_diamond": {
+      "k": 24.84037496997543,
+      "c": 0.01450750706134797,
+      "bytes_per_event": 7.567883450703408,
+      "overhead_bytes": 1314906.5541315184
+    },
+    "adara_diamond": {
+      "k": 24.84437490749582,
+      "c": 0.014494153341589188,
+      "bytes_per_event": 16.58274506876035,
+      "overhead_bytes": 161816.480229194
+    },
+    "nexus_background": {
+      "k": 5.445580052504742,
+      "c": 0.000636835545374782,
+      "bytes_per_event": 4.59816438454149,
+      "overhead_bytes": 1394062.747229737
+    },
+    "nexus_normalization": {
+      "k": 8.363549397776774,
+      "c": 0.000852649041399589,
+      "bytes_per_event": 4.010467438418328,
+      "overhead_bytes": 1589539.2134997833
+    }
+  },
+  "events_per_pulse": {
+    "nexus_diamond": 11583.876666666667,
+    "adara_diamond": 11583.876666666667,
+    "nexus_background": 2528.1653333333334,
+    "nexus_normalization": 16030.5
+  },
+  "correction_r_increase": 0.05,
+  "file_limit_bytes": 8388608,
+  "plan": {
+    "nexus_diamond": {
+      "pulses": 40,
+      "r_alone": 0.03927028686087902,
+      "bytes": 4803132,
+      "combined": {
+        "r": 0.04124489031065501,
+        "similarity": 0.958755109689345,
+        "max_peak_shift": 0.002042450071916946,
+        "mean_sigma_over_i": 0.11485927334454943
+      }
+    },
+    "adara_diamond": {
+      "pulses": 40,
+      "r_alone": 0.03927028686087902,
+      "bytes": 7852948,
+      "combined": {
+        "r": 0.04124494750783911,
+        "similarity": 0.9587550524921609,
+        "max_peak_shift": 0.002042450071916946,
+        "mean_sigma_over_i": 0.11485926709503426
+      }
+    },
+    "nexus_background": {
+      "pulses": 150,
+      "r_alone": 0.008625251036053718,
+      "bytes": 3028628
+    },
+    "nexus_normalization": {
+      "pulses": 30,
+      "r_alone": 0.00817025951380714,
+      "bytes": 3224364
+    }
+  }
+}

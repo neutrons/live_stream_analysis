@@ -176,3 +176,9 @@ cython_debug/
 adara_mount
 nexus_files
 repos
+
+# Notebook walkthrough outputs
+notebooks/output/
+
+# Trim study results, kept so the tutorial dataset sizes are traceable
+!scripts/tutorial_dataset/results/*.csv

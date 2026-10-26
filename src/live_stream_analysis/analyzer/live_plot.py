@@ -223,6 +223,9 @@ class BrowserHistogramPlotter:
         self._state.update(intensity, error, relative_uncertainty, statistics)
 
     def wait_until_closed(self) -> None:
+        # Processing is over by the time anything waits here, so mark it complete. Otherwise a
+        # page kept open with --live-plot-keep-open reports "Streaming updates" indefinitely.
+        self._state.close()
         self._thread.join()
 
     def close(self) -> None:
@@ -955,7 +958,7 @@ def _browser_plot_html() -> str:
                     <div class=\"panel-header\">
                         <span class=\"panel-kicker\">Quality Monitor</span>
                         <h3 class=\"panel-title\">Relative Uncertainty</h3>
-                        <p class=\"panel-copy\">Per-bin $\\sigma / I(Q)$ trend for the current live histogram.</p>
+                        <p class=\"panel-copy\">Per-bin σ / I(Q) trend for the current live histogram.</p>
                     </div>
                     <div class=\"panel-body\">
                         <div class=\"chart-shell\">
