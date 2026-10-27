@@ -572,7 +572,7 @@ class TestAdaraFileCLI:
 
         monkeypatch.setattr(
             "live_stream_analysis.analyzer.histogram_runner.create_live_histogram_plotter",
-            lambda _args, _histogram_bins: _StubPlotter(),
+            lambda _args, _histogram_bins, **_kwargs: _StubPlotter(),
         )
 
         rc = main(
@@ -1352,7 +1352,7 @@ class TestAdaraFileCLI:
 
         monkeypatch.setattr(
             "live_stream_analysis.analyzer.histogram_runner.create_live_histogram_plotter",
-            lambda _args, _histogram_bins: _StubPlotter(),
+            lambda _args, _histogram_bins, **_kwargs: _StubPlotter(),
         )
 
         rc = main(
@@ -1424,7 +1424,7 @@ class TestAdaraFileCLI:
 
         monkeypatch.setattr(
             "live_stream_analysis.analyzer.histogram_runner.create_live_histogram_plotter",
-            lambda _args, _histogram_bins: _StubPlotter(),
+            lambda _args, _histogram_bins, **_kwargs: _StubPlotter(),
         )
 
         rc = main(
@@ -1468,7 +1468,14 @@ class TestAdaraFileCLI:
 
         class _StubBrowserPlotter:
             def __init__(
-                self, q_min: float, q_bin_size: float, histogram_bins: int, host: str, port: int, open_browser: bool
+                self,
+                q_min: float,
+                q_bin_size: float,
+                histogram_bins: int,
+                host: str,
+                port: int,
+                open_browser: bool,
+                **_kwargs,
             ):
                 _ = (q_min, q_bin_size, histogram_bins)
                 created.append((host, port, open_browser))
@@ -1958,7 +1965,7 @@ class TestLivePlotShowsNormalizedHistogram:
 
         monkeypatch.setattr(
             "live_stream_analysis.analyzer.histogram_runner.create_live_histogram_plotter",
-            lambda _args, _histogram_bins: _RecordingPlotter(),
+            lambda _args, _histogram_bins, **_kwargs: _RecordingPlotter(),
         )
         return peaks
 

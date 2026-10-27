@@ -177,6 +177,24 @@ after the analysis ends, `--live-plot-no-open-browser` skips opening a tab, and
 `--live-plot-refresh-every N` refreshes every N packets (ADARA) or chunks of 250,000 events (NeXus).
 `--live-plot-mode desktop` opens the same panels in a matplotlib window instead.
 
+#### Replacing the background mid-run
+
+The browser dashboard's **Background Subtraction** panel takes a background CSV, dropped onto it
+or chosen with a click, and subtracts it from then on without restarting the analysis. The
+histogram accumulates raw counts and the corrections are applied each time it is shown, so the
+counts collected so far are kept and simply re-corrected. The file is read exactly as
+`--background-subtraction` is, binned by `Q value` and scaled by its own exposure totals. A file
+with no rows inside the histogram's Q range, or without the three required columns, is rejected
+and the current background stays.
+
+The plot redraws as soon as the upload is accepted, even with no data arriving. The histogram CSV
+snapshots and INTERSECT events pick it up from the next packet. Error-decay points already
+recorded keep the background they were computed with. The panel shows the active file and how many
+bins it covers, and warns if it records no exposure total for `--normalize-by`.
+
+The same change can be made over INTERSECT with `set_background`. Anyone who can reach the
+dashboard can upload, so with `--live-plot-host 0.0.0.0` keep the port on a trusted network.
+
 ## INTERSECT
 
 The analyzer publishes INTERSECT events over RabbitMQ/AMQP: periodic `histogram_updated` snapshots

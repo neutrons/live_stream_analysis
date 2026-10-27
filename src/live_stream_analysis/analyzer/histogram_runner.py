@@ -34,6 +34,7 @@ from .histogram import (
     compute_relative_uncertainty,
     load_pixel_q_conversion,
     preload_corrections,
+    replace_background,
     validate_histogram_args,
     write_histogram_csv,
 )
@@ -330,6 +331,33 @@ class _HistogramSession:
     def set_active_hist(self, hist: list[int]) -> None:
         self.active_hist = hist
 
+    def upload_background(self, csv_text: str) -> str:
+        """Install a background CSV uploaded to the dashboard, returning a summary to show (#43).
+
+        Called from the dashboard's request thread, so it only redraws the plot: the CSV
+        snapshots and INTERSECT events pick the new background up on the next packet.
+        """
+        matched_bins = replace_background(self.runtime_state, self.args, self.histogram_bins, csv_text)
+        if self.plotter is not None and self.active_hist is not None and any(self.active_hist):
+            # Redraws are otherwise driven by event packets, so with the beam off the plot
+            # would keep showing the old subtraction and the upload would look ignored.
+            maybe_update_live_plot(
+                self.plotter,
+                list(self.active_hist),
+                None,
+                1,
+                1,
+                force=True,
+                statistics_series=self.runtime_state.run_statistics.series,
+                display_transform=self.corrected,
+            )
+        summary = f"covers {matched_bins} of {self.histogram_bins} bins"
+        totals = self.runtime_state.background()[2]
+        if self.args.normalize_by != "none" and (totals is None or totals.divisor(self.args.normalize_by) is None):
+            # The same caveat the startup CSV is logged with, surfaced where the operator is looking.
+            summary += "; records no exposure total, so it is subtracted on the sample's scale"
+        return summary
+
     def finish(self, hist: list[int]) -> tuple[list[float], list[float]]:
         """Correct whatever the last accumulation left behind."""
         LOGGER.info("Applying background subtraction and normalization corrections")
@@ -585,7 +613,6 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
     try:
         LOGGER.info("Starting histogram analysis")
         histogram_bins, q_values, statistics_window, runtime_state = _prepare_runtime_state(args)
-        plotter = create_live_histogram_plotter(args, histogram_bins)
         runner = create_source_runner(args)
         intersect_config = None
         if args.enable_intersect:
@@ -597,10 +624,18 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
             q_values=q_values,
             statistics_window=statistics_window,
             runtime_state=runtime_state,
-            plotter=plotter,
+            plotter=None,
             publisher=publisher,
             intersect_config=intersect_config,
         )
+        # The dashboard's upload handler needs the session, so the plotter is attached after it.
+        plotter = create_live_histogram_plotter(
+            args,
+            histogram_bins,
+            background_handler=session.upload_background,
+            background_source=Path(args.background_subtraction).name if args.background_subtraction else None,
+        )
+        session.plotter = plotter
         _wait_for_source(args, runtime_state)
         LOGGER.info("Beginning event accumulation")
         counts, hist, adara_stats = _accumulate_until_done(session, runner, reader)

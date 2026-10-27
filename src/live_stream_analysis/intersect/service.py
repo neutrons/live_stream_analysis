@@ -58,6 +58,9 @@ class HistogramRuntimeState:
     adara_file_read_released: bool = True
     adara_file_read_event: threading.Event = field(default_factory=threading.Event)
     run_statistics: RunStatistics = field(default_factory=RunStatistics)
+    # Corrections are replaced from the INTERSECT and dashboard threads while the analyzer
+    # thread applies them, so values, errors and totals are swapped and read as one unit.
+    correction_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def __post_init__(self) -> None:
         if self.adara_file_read_released:
@@ -77,6 +80,32 @@ class HistogramRuntimeState:
 
     def release_adara_file_read(self) -> None:
         self.configure_adara_file_read_gate(True)
+
+    def set_background(self, values: list[float], errors: list[float], totals: CorrectionTotals | None) -> None:
+        with self.correction_lock:
+            self.background_values = values
+            self.background_errors = errors
+            self.background_totals = totals
+
+    def background(self) -> tuple[list[float], list[float], CorrectionTotals | None] | None:
+        with self.correction_lock:
+            if self.background_values is None:
+                return None
+            errors = self.background_errors or [0.0] * len(self.background_values)
+            return self.background_values, errors, self.background_totals
+
+    def set_normalization(self, values: list[float], errors: list[float], totals: CorrectionTotals | None) -> None:
+        with self.correction_lock:
+            self.normalization_values = values
+            self.normalization_errors = errors
+            self.normalization_totals = totals
+
+    def normalization(self) -> tuple[list[float], list[float], CorrectionTotals | None] | None:
+        with self.correction_lock:
+            if self.normalization_values is None:
+                return None
+            errors = self.normalization_errors or [0.0] * len(self.normalization_values)
+            return self.normalization_values, errors, self.normalization_totals
 
     def validate_correction_length(self, values: list[float], kind: str) -> None:
         if self.correction_bins is None:
@@ -123,18 +152,14 @@ class LiveStreamAnalysisCapability(IntersectBaseCapabilityImplementation):
     def set_background(self, payload: CsvTextRequest) -> UpdateResponse:
         values, errors, totals = _load_correction_from_csv_text(payload.csv_text)
         self.runtime_state.validate_correction_length(values, "Background")
-        self.runtime_state.background_values = values
-        self.runtime_state.background_errors = errors
-        self.runtime_state.background_totals = totals
+        self.runtime_state.set_background(values, errors, totals)
         return UpdateResponse(status="updated", kind="background")
 
     @intersect_message()
     def set_normalization(self, payload: CsvTextRequest) -> UpdateResponse:
         values, errors, totals = _load_correction_from_csv_text(payload.csv_text)
         self.runtime_state.validate_correction_length(values, "Normalization")
-        self.runtime_state.normalization_values = values
-        self.runtime_state.normalization_errors = errors
-        self.runtime_state.normalization_totals = totals
+        self.runtime_state.set_normalization(values, errors, totals)
         return UpdateResponse(status="updated", kind="normalization")
 
     @intersect_message()
