@@ -92,7 +92,24 @@ def bin_centre_q_values(q_min: float, q_bin_size: float, bins: int) -> list[floa
     return [q_min + (index + 0.5) * q_bin_size for index in range(bins)]
 
 
+def counting_variance(count: float) -> float:
+    """Return the Poisson variance of a bin holding ``count`` events, or 1 if it is empty.
+
+    This is Mantid's SetUncertainties "sqrtOrOne" convention. Plain sqrt(N) gives an empty bin
+    an error of zero, which reports a bin nothing has been measured in as perfectly known --
+    exactly backwards at the start of a run, where it reads as converged data.
+    """
+    return count if count > 0 else 1.0
+
+
 def compute_relative_uncertainty(intensity: list[float], error: list[float]) -> list[float]:
+    """Return sigma/I(Q) per bin, with 0.0 marking a bin where it is undefined.
+
+    sigma/I has no value where I(Q) = 0. Every consumer treats the 0.0 as "no data" -- the
+    decay mean skips it and the plots leave a gap. A genuine 0.0 cannot be confused with it:
+    counting_variance keeps every sample bin's error above zero, so a zero only survives where
+    the normalization does not cover the bin, which is no data either.
+    """
     relative_uncertainty: list[float] = []
     for y_value, err_value in zip(intensity, error, strict=True):
         if y_value == 0.0:
@@ -189,7 +206,7 @@ def apply_corrections(  # noqa: C901
     sample_divisor = _accumulation_divisor(args, runtime_state)
     sample_scale = 1.0 / sample_divisor if sample_divisor is not None else 1.0
     corrected = [float(value) * sample_scale for value in hist]
-    variance = [float(value) * sample_scale**2 for value in hist]
+    variance = [counting_variance(float(value)) * sample_scale**2 for value in hist]
 
     background = None
     background_error = None

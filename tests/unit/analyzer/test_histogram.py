@@ -4,6 +4,7 @@ import argparse
 import math
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import pytest
 
 from live_stream_analysis.analyzer.histogram import (
@@ -470,3 +471,83 @@ def test_maybe_update_live_plot_defaults_to_raw_counts_and_poisson_error():
     maybe_update_live_plot(plotter, [4, 9], None, 1, 1)
 
     assert plotter.frames == [([4.0, 9.0], [2.0, 3.0])]
+
+
+def test_apply_corrections_gives_an_empty_bin_an_error_of_one_count():
+    """Issue #40: Mantid's SetUncertainties "sqrtOrOne" convention.
+
+    sqrt(0) = 0 would report an unmeasured bin as perfectly known, which reads as converged
+    data at the start of every run. Populated bins keep their plain sqrt(N) error.
+    """
+    corrected, error = apply_corrections([0, 4], _normalization_args("none"), 2)
+
+    assert corrected == [0.0, 4.0]
+    assert error == [pytest.approx(1.0), pytest.approx(2.0)]
+
+
+def test_apply_corrections_scales_the_one_count_error_with_the_exposure():
+    state = _runtime_state_with(elapsed_seconds=10.0, proton_charge_pc=4.0)
+
+    corrected, error = apply_corrections([0, 16], _normalization_args("proton-charge"), 2, runtime_state=state)
+
+    assert corrected == [0.0, pytest.approx(4.0)]
+    assert error == [pytest.approx(1.0 / 4.0), pytest.approx(1.0)]
+
+
+def test_apply_corrections_keeps_the_sample_error_of_an_empty_bin_under_a_background():
+    """An empty bin minus the background must not inherit only the background's small error."""
+    state = _state_with_corrections(
+        elapsed_seconds=99.0,
+        proton_charge_pc=4.0,
+        background=([10.0, 10.0], [2.0, 2.0], CorrectionTotals(proton_charge_pc=2.0, duration_s=1.0)),
+    )
+
+    corrected, error = apply_corrections([0, 80], _normalization_args("proton-charge"), 2, runtime_state=state)
+
+    assert corrected == [pytest.approx(-10 / 2), pytest.approx(80 / 4 - 10 / 2)]
+    # var = max(S, 1)/Qs^2 + sigma_B^2/Qb^2
+    assert error == [pytest.approx(math.sqrt(1 / 16 + 4 / 4)), pytest.approx(math.sqrt(80 / 16 + 4 / 4))]
+
+
+def test_apply_corrections_still_blanks_bins_the_normalization_does_not_cover():
+    state = _state_with_corrections(
+        elapsed_seconds=1.0,
+        proton_charge_pc=1.0,
+        normalization=([0.0, 2.0], [0.0, 0.0], None),
+    )
+
+    corrected, error = apply_corrections([0, 4], _normalization_args("none"), 2, runtime_state=state)
+
+    assert corrected == [0.0, pytest.approx(2.0)]
+    assert error == [0.0, pytest.approx(1.0)]
+
+
+def test_maybe_update_live_plot_gives_empty_raw_bins_an_error_of_one_count():
+    plotter = _CountingPlotter()
+
+    maybe_update_live_plot(plotter, [0, 9], None, 1, 1)
+
+    assert plotter.frames == [([0.0, 9.0], [1.0, 3.0])]
+
+
+def test_browser_plot_leaves_a_gap_where_sigma_over_i_is_undefined():
+    """sigma/I has no value where I(Q) = 0; drawing it as 0 reads as a perfectly known bin."""
+    state = _BrowserPlotState(bin_centre_q_values(0.0, 0.02, 2))
+
+    state.update([0.0, 4.0], [1.0, 2.0], compute_relative_uncertainty([0.0, 4.0], [1.0, 2.0]))
+
+    assert state.snapshot()["relative_uncertainty"] == [None, pytest.approx(0.5)]
+    assert state.snapshot()["status"]["mean_relative_uncertainty"] == pytest.approx(0.5)
+
+
+def test_desktop_plot_leaves_a_gap_where_sigma_over_i_is_undefined(monkeypatch):
+    monkeypatch.setattr("live_stream_analysis.analyzer.live_plot.plt.pause", lambda _interval: None)
+    plotter = LiveHistogramPlotter(0.0, 0.02, 2)
+    try:
+        plotter.update([0.0, 4.0], [1.0, 2.0], compute_relative_uncertainty([0.0, 4.0], [1.0, 2.0]))
+
+        y_values = plotter._relative_line.get_ydata()
+        assert math.isnan(y_values[0])
+        assert y_values[1] == pytest.approx(0.5)
+    finally:
+        plt.close(plotter._figure)
