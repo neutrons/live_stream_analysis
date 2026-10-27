@@ -136,6 +136,8 @@ class _HistogramSession:
     def __post_init__(self) -> None:
         snapshot_every = self.args.histogram_snapshot_every
         self._next_snapshot_event_count = max(1, snapshot_every) if snapshot_every > 0 else None
+        # INTERSECT set_background reaches the session through the runtime state it shares.
+        self.runtime_state.background_uploader = self.upload_background
 
     def corrected(self, hist: list[int]) -> tuple[list[float], list[float]]:
         return apply_corrections(hist, self.args, self.histogram_bins, runtime_state=self.runtime_state)
@@ -331,16 +333,22 @@ class _HistogramSession:
     def set_active_hist(self, hist: list[int]) -> None:
         self.active_hist = hist
 
-    def upload_background(self, csv_text: str) -> str:
-        """Install a background CSV uploaded to the dashboard, returning a summary to show (#43).
+    def upload_background(self, csv_text: str, source: str) -> str:
+        """Install a background CSV mid-run, returning a summary of what was applied (#43).
 
-        Called from the dashboard's request thread, so it only redraws the plot: the CSV
-        snapshots and INTERSECT events pick the new background up on the next packet.
+        The one path for both the dashboard upload and INTERSECT set_background. It runs on
+        their request threads, so it only redraws the plot: the CSV snapshots and INTERSECT
+        events pick the new background up on the next packet.
         """
         matched_bins = replace_background(self.runtime_state, self.args, self.histogram_bins, csv_text)
-        if self.plotter is not None and self.active_hist is not None and any(self.active_hist):
+        if (
+            getattr(self.plotter, "accepts_updates_from_any_thread", False)
+            and self.active_hist is not None
+            and any(self.active_hist)
+        ):
             # Redraws are otherwise driven by event packets, so with the beam off the plot
-            # would keep showing the old subtraction and the upload would look ignored.
+            # would keep showing the old subtraction and the upload would look ignored. A
+            # matplotlib window can only be drawn from the analyzer's thread, so it waits.
             maybe_update_live_plot(
                 self.plotter,
                 list(self.active_hist),
@@ -356,6 +364,9 @@ class _HistogramSession:
         if self.args.normalize_by != "none" and (totals is None or totals.divisor(self.args.normalize_by) is None):
             # The same caveat the startup CSV is logged with, surfaced where the operator is looking.
             summary += "; records no exposure total, so it is subtracted on the sample's scale"
+        if self.plotter is not None:
+            self.plotter.background_replaced(source, summary)
+        LOGGER.info("Background subtraction replaced from %s: %s", source, summary)
         return summary
 
     def finish(self, hist: list[int]) -> tuple[list[float], list[float]]:

@@ -192,8 +192,12 @@ snapshots and INTERSECT events pick it up from the next packet. Error-decay poin
 recorded keep the background they were computed with. The panel shows the active file and how many
 bins it covers, and warns if it records no exposure total for `--normalize-by`.
 
-The same change can be made over INTERSECT with `set_background`. Anyone who can reach the
-dashboard can upload, so with `--live-plot-host 0.0.0.0` keep the port on a trusted network.
+INTERSECT `set_background` takes the same path: the CSV is checked and binned identically, the
+dashboard shows it as the active background, and the response's `message` carries the same
+summary. A desktop (`--live-plot-mode desktop`) window redraws on the next packet instead, since
+matplotlib cannot be drawn from the INTERSECT thread. `set_normalization` still assigns rows to
+bins by position. Anyone who can reach the dashboard can upload, so with
+`--live-plot-host 0.0.0.0` keep the port on a trusted network.
 
 ## INTERSECT
 

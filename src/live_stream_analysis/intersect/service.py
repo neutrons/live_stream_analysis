@@ -3,6 +3,7 @@ import io
 import logging
 import queue
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Protocol
 
@@ -61,6 +62,9 @@ class HistogramRuntimeState:
     # Corrections are replaced from the INTERSECT and dashboard threads while the analyzer
     # thread applies them, so values, errors and totals are swapped and read as one unit.
     correction_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    # Installed by the running analysis: takes background CSV text and the name of where it
+    # came from, applies it the way a dashboard upload is applied, and returns a summary.
+    background_uploader: Callable[[str, str], str] | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if self.adara_file_read_released:
@@ -150,10 +154,12 @@ class LiveStreamAnalysisCapability(IntersectBaseCapabilityImplementation):
 
     @intersect_message()
     def set_background(self, payload: CsvTextRequest) -> UpdateResponse:
-        values, errors, totals = _load_correction_from_csv_text(payload.csv_text)
-        self.runtime_state.validate_correction_length(values, "Background")
-        self.runtime_state.set_background(values, errors, totals)
-        return UpdateResponse(status="updated", kind="background")
+        """Replace the background mid-run, exactly as a CSV uploaded to the dashboard does."""
+        uploader = self.runtime_state.background_uploader
+        if uploader is None:
+            raise ValueError("set_background has no running analysis to bin the background onto")
+        message = uploader(payload.csv_text, "INTERSECT set_background")
+        return UpdateResponse(status="updated", kind="background", message=message)
 
     @intersect_message()
     def set_normalization(self, payload: CsvTextRequest) -> UpdateResponse:

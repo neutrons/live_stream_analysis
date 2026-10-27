@@ -128,14 +128,26 @@ class TestRuntimeStateBackground:
 
 
 class _RecordingPlotter:
+    accepts_updates_from_any_thread = True
+
     def __init__(self):
         self.frames: list[list[float]] = []
+        self.backgrounds: list[tuple[str, str]] = []
 
     def update(self, intensity, _error, _relative_uncertainty, _statistics=None):
         self.frames.append(intensity)
 
+    def background_replaced(self, source: str, message: str) -> None:
+        self.backgrounds.append((source, message))
+
     def close(self):
         return None
+
+
+class _MainThreadOnlyPlotter(_RecordingPlotter):
+    """Like the matplotlib window, which must only be drawn from the analyzer's thread."""
+
+    accepts_updates_from_any_thread = False
 
 
 def _session(plotter=None, **arg_overrides) -> _HistogramSession:
@@ -179,26 +191,53 @@ class TestSessionUpload:
         session = _session(plotter)
         session.set_active_hist([10, 10, 10, 10])
 
-        session.upload_background(_csv([(q, 4.0, 0.0) for q in Q_VALUES]))
+        session.upload_background(_csv([(q, 4.0, 0.0) for q in Q_VALUES]), "empty_can.csv")
 
         assert plotter.frames == [[6.0] * BINS]
+
+    def test_does_not_draw_a_plotter_tied_to_the_analyzer_thread(self):
+        """INTERSECT calls arrive on the SDK's thread; drawing matplotlib from there is unsafe."""
+        plotter = _MainThreadOnlyPlotter()
+        session = _session(plotter)
+        session.set_active_hist([10, 10, 10, 10])
+
+        session.upload_background(_csv([(q, 4.0, 0.0) for q in Q_VALUES]), "INTERSECT set_background")
+
+        assert plotter.frames == []
+        assert session.runtime_state.background()[0] == [4.0] * BINS
+
+    def test_tells_the_plotter_which_background_is_now_active(self):
+        plotter = _RecordingPlotter()
+        session = _session(plotter)
+
+        session.upload_background(_csv([(0.01, 4.0, 0.0)]), "INTERSECT set_background")
+
+        assert plotter.backgrounds == [("INTERSECT set_background", "covers 1 of 4 bins")]
+
+    def test_a_rejected_background_does_not_change_what_the_plotter_reports(self):
+        plotter = _RecordingPlotter()
+
+        with pytest.raises(ValueError):
+            _session(plotter).upload_background("bad,data\n1,2\n", "wrong.csv")
+
+        assert plotter.backgrounds == []
 
     def test_before_any_counts_it_only_installs_the_background(self):
         plotter = _RecordingPlotter()
         session = _session(plotter)
 
-        session.upload_background(_csv([(q, 4.0, 0.0) for q in Q_VALUES]))
+        session.upload_background(_csv([(q, 4.0, 0.0) for q in Q_VALUES]), "empty_can.csv")
 
         assert plotter.frames == []
         assert session.runtime_state.background()[0] == [4.0] * BINS
 
     def test_summarizes_the_coverage(self):
-        message = _session().upload_background(_csv([(0.01, 4.0, 0.0), (0.03, 4.0, 0.0)]))
+        message = _session().upload_background(_csv([(0.01, 4.0, 0.0), (0.03, 4.0, 0.0)]), "x.csv")
 
         assert message == "covers 2 of 4 bins"
 
     def test_warns_when_the_background_cannot_be_put_on_the_sample_exposure_scale(self):
-        message = _session(normalize_by="proton-charge").upload_background(_csv([(0.01, 4.0, 0.0)]))
+        message = _session(normalize_by="proton-charge").upload_background(_csv([(0.01, 4.0, 0.0)]), "x.csv")
 
         assert "records no exposure total" in message
 
@@ -206,12 +245,12 @@ class TestSessionUpload:
 class TestBrowserUploadEndpoint:
     @pytest.fixture
     def uploads(self):
-        received: list[str] = []
+        received: list[tuple[str, str]] = []
 
-        def handler(csv_text: str) -> str:
+        def handler(csv_text: str, source: str) -> str:
             if "bad" in csv_text:
                 raise ValueError("Correction CSV must include columns: 'Q value', 'I(Q)', 'Error I(Q)'")
-            received.append(csv_text)
+            received.append((csv_text, source))
             return "matched 2 of 4 bins"
 
         plotter = BrowserHistogramPlotter(
@@ -234,19 +273,27 @@ class TestBrowserUploadEndpoint:
         with urllib.request.urlopen(f"{url}state", timeout=5) as response:
             return json.loads(response.read())
 
-    def test_hands_the_uploaded_csv_to_the_handler_and_reports_it_as_active(self, uploads):
+    def test_hands_the_uploaded_csv_and_its_file_name_to_the_handler(self, uploads):
         plotter, received = uploads
         body = _csv([(0.01, 1.0, 0.1)]).encode("utf-8")
 
         with self._post(plotter.url, body) as response:
             reply = json.loads(response.read())
 
-        assert received == [body.decode("utf-8")]
+        assert received == [(body.decode("utf-8"), "empty_can.csv")]
         assert reply == {"status": "updated", "source": "empty_can.csv", "message": "matched 2 of 4 bins"}
+        assert self._state(plotter.url)["background"]["uploads_enabled"] is True
+
+    def test_shows_whichever_background_was_last_reported_active(self, uploads):
+        """Set by the session for dashboard uploads and INTERSECT set_background alike."""
+        plotter, _ = uploads
+
+        plotter.background_replaced("INTERSECT set_background", "covers 2 of 4 bins")
+
         background = self._state(plotter.url)["background"]
-        assert background["uploads_enabled"] is True
-        assert background["source"] == "empty_can.csv"
-        assert background["message"] == "matched 2 of 4 bins"
+        assert background["source"] == "INTERSECT set_background"
+        assert background["message"] == "covers 2 of 4 bins"
+        assert background["updated_at"] is not None
 
     def test_reports_a_rejected_csv_and_keeps_the_previous_source(self, uploads):
         plotter, _ = uploads
@@ -317,7 +364,10 @@ def test_analyzer_wires_dashboard_uploads_into_the_running_histogram(tmp_path: P
         def update(self, *_args, **_kwargs):
             if not self.uploaded:
                 self.uploaded = True
-                factory_kwargs["background_handler"](_csv([(99.01, 0.5, 0.0)]))
+                factory_kwargs["background_handler"](_csv([(99.01, 0.5, 0.0)]), "empty_can.csv")
+
+        def background_replaced(self, _source, _message):
+            return None
 
         def close(self):
             return None
@@ -348,4 +398,7 @@ def test_analyzer_wires_dashboard_uploads_into_the_running_histogram(tmp_path: P
 
     assert rc == 0
     assert factory_kwargs["background_source"] is None
+    # INTERSECT set_background goes through the very same session method as the dashboard.
+    session = factory_kwargs["background_handler"].__self__
+    assert session.runtime_state.background_uploader == session.upload_background
     assert "99.01000000,1.50000000," in histogram_csv.read_text(encoding="utf-8")

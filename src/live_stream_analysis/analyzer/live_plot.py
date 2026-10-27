@@ -43,12 +43,16 @@ class HistogramPlotter(Protocol):
         statistics: StatisticsSnapshot | None = None,
     ) -> None: ...
 
+    def background_replaced(self, source: str, message: str) -> None: ...
+
     def wait_until_closed(self) -> None: ...
 
     def close(self) -> None: ...
 
 
-BackgroundHandler = Callable[[str], str]
+# Takes the uploaded CSV text and its file name, applies it or raises ValueError, and returns
+# a one-line summary for the page.
+BackgroundHandler = Callable[[str, str], str]
 
 
 class _BrowserPlotState:
@@ -236,14 +240,12 @@ class _BrowserPlotRequestHandler(BaseHTTPRequestHandler):
         source = parse_qs(parsed.query).get("name", ["uploaded background"])[0]
         try:
             csv_text = self.rfile.read(length).decode("utf-8-sig")
-            message = handler(csv_text)
+            message = handler(csv_text, source)
         except (UnicodeDecodeError, ValueError) as exc:
             logger.warning("Rejected background CSV %r uploaded to the live plot: %s", source, exc)
             self._write_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return
 
-        self.server.state.background_replaced(source, message)
-        logger.info("Background subtraction replaced from live plot upload %r: %s", source, message)
         self._write_json(HTTPStatus.OK, {"status": "updated", "source": source, "message": message})
 
     def log_message(self, _format: str, *_args) -> None:
@@ -269,6 +271,9 @@ class _BrowserPlotServer(ThreadingHTTPServer):
 class BrowserHistogramPlotter:
     # A background CSV is a few thousand rows; anything near this is the wrong file.
     MAX_UPLOAD_BYTES = 16 * 1024 * 1024
+    # Updates only swap a payload under a lock, so a background replaced from a request
+    # thread can redraw at once.
+    accepts_updates_from_any_thread = True
 
     def __init__(
         self,
@@ -305,6 +310,9 @@ class BrowserHistogramPlotter:
         statistics: StatisticsSnapshot | None = None,
     ) -> None:
         self._state.update(intensity, error, relative_uncertainty, statistics)
+
+    def background_replaced(self, source: str, message: str) -> None:
+        self._state.background_replaced(source, message)
 
     def wait_until_closed(self) -> None:
         # Processing is over by the time anything waits here, so mark it complete. Otherwise a
@@ -529,6 +537,10 @@ class LiveHistogramPlotter:
         self._figure.canvas.flush_events()
         plt.pause(0.001)
 
+    def background_replaced(self, _source: str, _message: str) -> None:
+        # The window has nowhere to show it; the analyzer log records the change.
+        return
+
     def wait_until_closed(self) -> None:
         plt.show()
 
@@ -544,6 +556,9 @@ class NullHistogramPlotter:
         _relative_uncertainty: list[float],
         _statistics: StatisticsSnapshot | None = None,
     ) -> None:
+        return
+
+    def background_replaced(self, _source: str, _message: str) -> None:
         return
 
     def wait_until_closed(self) -> None:
