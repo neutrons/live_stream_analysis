@@ -283,7 +283,7 @@ def accumulate_adara_histogram(  # noqa: C901
                 stats.skipped_masked_pixels += 1
                 continue
 
-            # Share the NeXus conversion so DIFA/DIFC/TZERO calibration is honoured here too.
+            # Share the NeXus conversion so both paths compute Q identically.
             q = pixel_tof_to_q(active_q_conversion, pixel_id, float(tof) * tof_tick_us)
             if q is None or q <= 0.0:
                 stats.skipped_unconvertible_events += 1

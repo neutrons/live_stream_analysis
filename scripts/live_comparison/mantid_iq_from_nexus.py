@@ -36,8 +36,10 @@ def build_iq(
 ):
     """Load events, optionally calibrate, convert to Q, rebin, and sum to a single spectrum.
 
-    The chain mirrors what the analyzer does per event: TOF -> d (via DIFC/DIFA/TZERO)
-    -> Q = 2*pi/d, then accumulate counts into fixed-width Q bins.
+    The chain mirrors what the analyzer does per event: Q = 2*pi*DIFC / TOF, then accumulate
+    counts into fixed-width Q bins. ApplyDiffCal also sets DIFA and TZERO, but ConvertUnits to
+    MomentumTransfer uses DIFC alone (only the dSpacing conversion applies DIFA/TZERO), which is
+    the same physics as the analyzer.
     """
     workspace = LoadEventNexus(Filename=str(nexus_file), OutputWorkspace="lsa_cmp_events")
 
@@ -51,9 +53,9 @@ def build_iq(
         ApplyDiffCal(InstrumentWorkspace=workspace, CalibrationWorkspace="lsa_cmp_cal_cal")
         if apply_mask:
             # ApplyDiffCal only sets difc/difa/tzero, so by default Mantid still histograms
-            # pixels the analyzer skips via the `use` flag. Applying LoadDiffCal's mask
-            # workspace is the obvious counterpart, but on NOMAD the two do not line up:
-            # see the mask discussion in this directory's README before trusting either total.
+            # pixels the analyzer skips via the `use` flag. LoadDiffCal's mask workspace is
+            # the counterpart: with the same calibration file on both sides it masks exactly
+            # the pixels the preparer marks `use = 0`.
             MaskDetectors(Workspace=workspace, MaskedWorkspace="lsa_cmp_cal_mask")
 
     workspace = ConvertUnits(
@@ -97,7 +99,7 @@ def main() -> int:
     parser.add_argument(
         "--apply-calibration-mask",
         action="store_true",
-        help="Also apply the calibration's mask workspace. See the README: it does not match the `use` flag.",
+        help="Also apply the calibration's mask workspace, the counterpart of the analyzer's `use` flag.",
     )
     parser.add_argument("--histogram-q-min", type=float, default=0.0)
     parser.add_argument("--histogram-q-max", type=float, default=40.0)

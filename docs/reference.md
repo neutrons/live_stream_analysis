@@ -21,9 +21,13 @@ live_stream_analysis preparer \
     --iq-csv iq.csv
 ```
 
-`--calibration-file` takes a Mantid diffraction calibration (`SaveDiffCal` HDF5) and adds `difc`,
-`difa`, `tzero` and `use` columns. The analyzer then converts each event with
-`TOF = DIFA*d^2 + DIFC*d + TZERO` and `Q = 2*pi/d`, and skips pixels with `use = 0`.
+The analyzer converts each event with `Q = (TOF-to-Q matrix element) / TOF`. Without a
+calibration the matrix element comes from the IDF geometry, `4*pi*sin(theta)*252.777*L`.
+`--calibration-file` takes a Mantid diffraction calibration (`SaveDiffCal` HDF5), replaces the
+matrix element with `2*pi*DIFC`, and adds `difc`, `difa`, `tzero` and `use` columns. The analyzer
+skips pixels with `use = 0`; `difc`, `difa` and `tzero` are kept for reference only, so DIFA and
+TZERO are not applied. This matches Mantid's `ConvertUnits` to `MomentumTransfer` after
+`ApplyDiffCal`, which also uses DIFC alone.
 
 Parser coverage is validated for the NOMAD IDF fixtures; a POWGEN fixture is kept for parser
 regression tests only.

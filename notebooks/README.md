@@ -38,7 +38,7 @@ The diamond sample is run 244114 (IPTS-37098, 2026-06-19) in both formats: the N
 when the run ended, and the ADARA packets the SMS streamed while it ran. The background and
 vanadium are IPTS-37412 standards from 2026-06-12, measured with the same PAC06 can type, since
 none were measured during IPTS-37098. The 2026-06-09 calibration is the newest one before either;
-on run 244114 it leaves the diamond peaks a constant 0.28 % low in Q.
+on run 244114 it leaves the diamond peaks a nearly constant 0.43 % low in Q.
 
 To use the full runs, set `FULL_DATA = True` in a Python notebook's setup cell (`FULL_RUN = True`
 in the stream notebooks); each CLI notebook lists the paths to swap in. The full runs need

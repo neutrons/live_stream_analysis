@@ -29,16 +29,10 @@ def test_accumulate_adara_histogram_uses_conversion_provider():
     conversions = [
         PixelQConversion(
             q_matrix_constants=[10.0],
-            difc=[0.0],
-            difa=[0.0],
-            tzero=[0.0],
             use=[1],
         ),
         PixelQConversion(
             q_matrix_constants=[20.0],
-            difc=[0.0],
-            difa=[0.0],
-            tzero=[0.0],
             use=[1],
         ),
     ]

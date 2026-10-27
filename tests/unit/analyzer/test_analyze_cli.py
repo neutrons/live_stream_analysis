@@ -1751,6 +1751,61 @@ class TestPreparedPixelGeometryCalibrationIntegration:
         assert "Histogrammed events" in out
         assert "0" in out
 
+    def test_nexus_histogram_converts_with_calibrated_difc_constant_ignoring_difa_and_tzero(self, tmp_path: Path):
+        """Issue #42: Q = 2*pi*DIFC / TOF. Applying DIFA/TZERO would move this event three bins up."""
+        idf_path = tmp_path / "test_definition.xml"
+        idf_path.write_text(_minimal_preparer_idf(), encoding="utf-8")
+        calibration_path = _write_diffcal(
+            tmp_path,
+            "calibration.h5",
+            detids=[1],
+            difc=[1000.0],
+            difa=[-10.0],
+            tzero=[20.0],
+            use=[1],
+        )
+        pixel_csv = tmp_path / "pixel_geometry_calibrated.csv"
+        preparer_rc = main(
+            [
+                "preparer",
+                "--idf-file",
+                str(idf_path),
+                "--calibration-file",
+                str(calibration_path),
+                "--pixel-geometry-csv",
+                str(pixel_csv),
+                "--iq-csv",
+                str(tmp_path / "iq.csv"),
+                "--q-bins",
+                "20",
+            ]
+        )
+        assert preparer_rc == 0
+
+        nexus_path = _write_nexus(tmp_path, "sample.nxs.h5", [1], [1000.0], _minimal_idf())
+        histogram_csv = tmp_path / "histogram_nexus.csv"
+        analyzer_rc = main(
+            [
+                "analyze",
+                "--nexus-file",
+                str(nexus_path),
+                "--histogram-pixel-geometry-csv",
+                str(pixel_csv),
+                "--histogram-q-max",
+                "30",
+                "--histogram-q-bin-size",
+                "0.02",
+                "--histogram-output-csv",
+                str(histogram_csv),
+            ]
+        )
+        assert analyzer_rc == 0
+
+        with histogram_csv.open(encoding="utf-8", newline="") as handle:
+            occupied = [float(row["Q value"]) for row in csv.DictReader(handle) if float(row["I(Q)"]) != 0.0]
+        # 2*pi*1000/1000 = 6.2832 falls in [6.28, 6.30); the DIFA/TZERO quadratic gives 6.3467.
+        assert occupied == [pytest.approx(6.29)]
+
 
 class TestCorrectionExposureNormalization:
     """Issue #37 end to end: preparer stamps each correction with its exposure, analyzer divides by it.

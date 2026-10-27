@@ -53,9 +53,6 @@ def test_accumulate_nexus_histogram_counts_events_into_expected_bin(tmp_path: Pa
     nexus_path = _write_nexus(tmp_path, "sample.nxs.h5", [1], [100.0])
     q_conversion = PixelQConversion(
         q_matrix_constants=[0.0, 1000.0],
-        difc=[0.0, 1000.0 / (2.0 * np.pi)],
-        difa=[0.0, 0.0],
-        tzero=[0.0, 0.0],
         use=[1, 1],
     )
 
@@ -102,9 +99,6 @@ def _write_nexus_with_run_totals(
 def _pixel_one_conversion() -> PixelQConversion:
     return PixelQConversion(
         q_matrix_constants=[0.0, 1000.0],
-        difc=[0.0, 1000.0 / (2.0 * np.pi)],
-        difa=[0.0, 0.0],
-        tzero=[0.0, 0.0],
         use=[1, 1],
     )
 

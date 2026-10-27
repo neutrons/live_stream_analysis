@@ -10,7 +10,7 @@ import h5py
 
 @dataclass(frozen=True, slots=True)
 class DetectorCalibration:
-    """Per-detector calibration parameters used in TOF -> d -> Q conversion."""
+    """Per-detector calibration parameters; only DIFC (as 2*pi*DIFC) and `use` affect Q."""
 
     difc: float
     difa: float

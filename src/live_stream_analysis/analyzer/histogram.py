@@ -3,20 +3,23 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
 from ..correction_totals import CorrectionTotals, load_correction_totals
 
-TWO_PI = 2.0 * math.pi
-
 
 @dataclass(frozen=True)
 class PixelQConversion:
+    """Per-pixel TOF-to-Q constants, indexed by pixel id, so that Q = constant / TOF.
+
+    The preparer also writes difc/difa/tzero columns when given a calibration. They are kept
+    in the CSV for reference only: the calibrated DIFC is already folded into the constant
+    (2*pi*DIFC), and DIFA/TZERO are deliberately not applied.
+    """
+
     q_matrix_constants: list[float]
-    difc: list[float]
-    difa: list[float]
-    tzero: list[float]
     use: list[int]
 
 
@@ -29,78 +32,40 @@ def load_pixel_q_conversion(pixel_geometry_csv: str) -> PixelQConversion:
     if not path.exists():
         raise FileNotFoundError(f"Pixel geometry CSV does not exist: {path}")
 
-    by_pixel_id: dict[int, tuple[float, float, float, float, int]] = {}
-    max_pixel_id = -1
     with path.open("r", encoding="utf-8", newline="") as handle:
-        reader = csv.DictReader(handle)
-        required_columns = {"pixel id", "TOF-to-Q matrix element"}
-        if reader.fieldnames is None or not required_columns.issubset(set(reader.fieldnames)):
-            raise ValueError("Pixel geometry CSV must include columns: 'pixel id' and 'TOF-to-Q matrix element'")
+        try:
+            return parse_pixel_q_conversion(handle)
+        except ValueError as error:
+            raise ValueError(f"{error}: {path}") from error
 
-        has_difc = "difc" in reader.fieldnames
-        has_difa = "difa" in reader.fieldnames
-        has_tzero = "tzero" in reader.fieldnames
-        has_use = "use" in reader.fieldnames
 
-        for row in reader:
-            pixel_id = int(row["pixel id"])
-            q_matrix_element = float(row["TOF-to-Q matrix element"])
-            difc = float(row["difc"]) if has_difc else (q_matrix_element / TWO_PI)
-            difa = float(row["difa"]) if has_difa else 0.0
-            tzero = float(row["tzero"]) if has_tzero else 0.0
-            use = int(float(row["use"])) if has_use else 1
+def parse_pixel_q_conversion(lines: Iterable[str]) -> PixelQConversion:
+    reader = csv.DictReader(lines)
+    required_columns = {"pixel id", "TOF-to-Q matrix element"}
+    if reader.fieldnames is None or not required_columns.issubset(set(reader.fieldnames)):
+        raise ValueError("Pixel geometry CSV must include columns: 'pixel id' and 'TOF-to-Q matrix element'")
 
-            if q_matrix_element == 0.0 and difc != 0.0:
-                q_matrix_element = TWO_PI * difc
-
-            by_pixel_id[pixel_id] = (q_matrix_element, difc, difa, tzero, use)
-            if pixel_id > max_pixel_id:
-                max_pixel_id = pixel_id
-
-    if max_pixel_id < 0:
-        raise ValueError(f"No detector rows found in pixel geometry CSV: {path}")
-
-    q_matrix_constants = [0.0] * (max_pixel_id + 1)
-    difc_values = [0.0] * (max_pixel_id + 1)
-    difa_values = [0.0] * (max_pixel_id + 1)
-    tzero_values = [0.0] * (max_pixel_id + 1)
-    use_values = [1] * (max_pixel_id + 1)
-    for pixel_id, (q_matrix_element, difc, difa, tzero, use) in by_pixel_id.items():
+    has_use = "use" in reader.fieldnames
+    by_pixel_id: dict[int, tuple[float, int]] = {}
+    for row in reader:
+        pixel_id = int(row["pixel id"])
         if pixel_id < 0:
             continue
+        use = int(float(row["use"])) if has_use else 1
+        by_pixel_id[pixel_id] = (float(row["TOF-to-Q matrix element"]), use)
 
+    if not by_pixel_id:
+        raise ValueError("No detector rows found in pixel geometry CSV")
+
+    max_pixel_id = max(by_pixel_id)
+    q_matrix_constants = [0.0] * (max_pixel_id + 1)
+    use_values = [1] * (max_pixel_id + 1)
+    for pixel_id, (q_matrix_element, use) in by_pixel_id.items():
         use_values[pixel_id] = use
         if use > 0:
             q_matrix_constants[pixel_id] = q_matrix_element
-        difc_values[pixel_id] = difc
-        difa_values[pixel_id] = difa
-        tzero_values[pixel_id] = tzero
 
-    return PixelQConversion(
-        q_matrix_constants=q_matrix_constants,
-        difc=difc_values,
-        difa=difa_values,
-        tzero=tzero_values,
-        use=use_values,
-    )
-
-
-def _d_spacing_from_calibration(tof_us: float, difc: float, difa: float, tzero: float) -> float | None:
-    if abs(difa) < 1e-12:
-        if difc == 0.0:
-            return None
-        d_spacing = (tof_us - tzero) / difc
-    else:
-        half = difc / (2.0 * difa)
-        discriminant = (half * half) - ((tzero - tof_us) / difa)
-        if discriminant < 0.0:
-            return None
-        root = math.sqrt(discriminant)
-        d_spacing = -half + root if difa > 0.0 else -half - root
-
-    if d_spacing <= 0.0:
-        return None
-    return d_spacing
+    return PixelQConversion(q_matrix_constants=q_matrix_constants, use=use_values)
 
 
 def pixel_tof_to_q(conversion: PixelQConversion, pixel_id: int, tof_us: float) -> float | None:
@@ -111,20 +76,10 @@ def pixel_tof_to_q(conversion: PixelQConversion, pixel_id: int, tof_us: float) -
     if conversion.use[pixel_id] <= 0:
         return None
 
-    difc = conversion.difc[pixel_id]
-    difa = conversion.difa[pixel_id]
-    tzero = conversion.tzero[pixel_id]
-
-    if difc == 0.0 and difa == 0.0 and tzero == 0.0:
-        q_matrix_element = conversion.q_matrix_constants[pixel_id]
-        if q_matrix_element <= 0.0:
-            return None
-        return q_matrix_element / tof_us
-
-    d_spacing = _d_spacing_from_calibration(tof_us, difc, difa, tzero)
-    if d_spacing is None:
+    q_matrix_element = conversion.q_matrix_constants[pixel_id]
+    if q_matrix_element <= 0.0:
         return None
-    return TWO_PI / d_spacing
+    return q_matrix_element / tof_us
 
 
 def bin_centre_q_values(q_min: float, q_bin_size: float, bins: int) -> list[float]:

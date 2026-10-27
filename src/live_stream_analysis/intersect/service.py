@@ -99,39 +99,9 @@ def _load_correction_from_csv_text(csv_text: str) -> tuple[list[float], list[flo
 
 
 def _load_pixel_q_conversion_from_csv_text(csv_text: str) -> Any:
-    reader = csv.DictReader(io.StringIO(csv_text))
-    required_columns = {"pixel id", "TOF-to-Q matrix element"}
-    if reader.fieldnames is None or not required_columns.issubset(set(reader.fieldnames)):
-        raise ValueError("Pixel geometry CSV must include columns: 'pixel id' and 'TOF-to-Q matrix element'")
+    from ..analyzer.histogram import parse_pixel_q_conversion
 
-    rows = list(reader)
-    if not rows:
-        raise ValueError("No detector rows found in pixel geometry CSV")
-
-    max_pixel_id = max(int(row["pixel id"]) for row in rows)
-    q_matrix_constants = [0.0] * (max_pixel_id + 1)
-    difc_values = [0.0] * (max_pixel_id + 1)
-    difa_values = [0.0] * (max_pixel_id + 1)
-    tzero_values = [0.0] * (max_pixel_id + 1)
-    use_values = [1] * (max_pixel_id + 1)
-
-    for row in rows:
-        pixel_id = int(row["pixel id"])
-        q_matrix_constants[pixel_id] = float(row["TOF-to-Q matrix element"])
-        difc_values[pixel_id] = float(row.get("difc", 0.0) or 0.0)
-        difa_values[pixel_id] = float(row.get("difa", 0.0) or 0.0)
-        tzero_values[pixel_id] = float(row.get("tzero", 0.0) or 0.0)
-        use_values[pixel_id] = int(float(row.get("use", 1) or 1))
-
-    from ..analyzer.histogram import PixelQConversion
-
-    return PixelQConversion(
-        q_matrix_constants=q_matrix_constants,
-        difc=difc_values,
-        difa=difa_values,
-        tzero=tzero_values,
-        use=use_values,
-    )
+    return parse_pixel_q_conversion(io.StringIO(csv_text))
 
 
 class LiveStreamAnalysisCapability(IntersectBaseCapabilityImplementation):

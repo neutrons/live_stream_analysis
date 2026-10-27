@@ -36,7 +36,7 @@ Our analyzer follows the same shape:
 | `StartLiveData` (entry point) | `live_stream_analysis analyze --adara-stream HOST PORT` |
 | `Listener` (`SNSLiveEventDataListener` for ADARA) | `readadara` `AdaraLiveStreamReader` |
 | `LoadLiveData` chunk | one ADARA packet from `reader.read_generator()` |
-| `ProcessingAlgorithm` (per chunk) | per-event TOF -> d -> Q via `pixel_tof_to_q` |
+| `ProcessingAlgorithm` (per chunk) | per-event Q = constant / TOF via `pixel_tof_to_q` |
 | `AccumulationMethod=Add` | `hist[bin] += 1` |
 | `AccumulationWorkspace` | the in-memory `hist` list |
 | `PostProcessingAlgorithm` (on accumulated data) | `apply_corrections` (background subtraction, vanadium normalisation) |
@@ -75,21 +75,26 @@ pixi run python -c "import mantid; print(mantid.__version__)"
 # Walkthrough 1: compare I(Q) against Mantid, from the same NeXus file
 
 This is the meaningful numeric check. Both sides read the same file with the same Q binning.
+The walkthrough uses the same data as the notebooks: diamond run 244114 with the 2026-06-09
+calibration (243451), the newest one measured before it. NOMAD needs a calibration from the same
+sample-environment setup, since the sample position moves each time the environment is swapped.
 
 ### 1. Reduce with Mantid
 
 ```bash
 cd scripts/live_comparison
 pixi run python mantid_iq_from_nexus.py \
-    --nexus-file ../../nexus_files/diamond/NOM_243708.nxs.h5 \
+    --nexus-file ../../nexus_files/diamond/NOM_244114.nxs.h5 \
     --histogram-q-max 40 \
     --histogram-q-bin-size 0.02 \
-    --output-csv /tmp/mantid_iq.csv
+    --output-csv mantid_iq.csv
 ```
 
-Add `--calibration-file ../../nexus_files/calibration/NOMAD_243451_2026-06-09_shifter.h5` to
-apply DIFC/DIFA/TZERO. Takes about a minute for the 1.7 GB `NOM_243708`; note that
-`NOM_243709` is 15.4 GB and needs far more time and memory.
+For the calibrated reduction, add
+`--calibration-file ../../nexus_files/calibration/NOMAD_243451_2026-06-09_shifter.h5 --apply-calibration-mask`
+and write `mantid_iq_calibrated.csv`. That applies the calibrated DIFC, the same constant the
+analyzer uses, and masks the same pixels the analyzer skips. Each reduction of the 3.3 GB
+`NOM_244114` takes about a minute.
 
 ### 2. Reduce with the analyzer
 
@@ -97,19 +102,25 @@ From the repository root, in the uv environment:
 
 ```bash
 uv run live_stream_analysis analyze \
-    --nexus-file nexus_files/diamond/NOM_243708.nxs.h5 \
+    --nexus-file nexus_files/diamond/NOM_244114.nxs.h5 \
     --histogram-pixel-geometry-csv pixel_geometry.csv \
     --histogram-q-max 40 \
     --histogram-q-bin-size 0.02 \
-    --histogram-output-csv /tmp/lsa_iq.csv
+    --normalize-by none \
+    --histogram-output-csv scripts/live_comparison/live_stream_analysis_iq.csv
 ```
 
-Use `pixel_geometry_calibrated.csv` if you passed `--calibration-file` above.
+`--normalize-by none` keeps raw counts, as Mantid reports them; by default the analyzer divides by
+proton charge. For the calibrated reduction, use `pixel_geometry_calibrated.csv` (the preparer
+output for the 243451 calibration; see `docs/reference.md`) and write
+`live_stream_analysis_iq_calibrated.csv`. Each takes about three to four minutes.
 
 ### 3. Diff them
 
 ```bash
-uv run python scripts/live_comparison/compare_iq.py /tmp/mantid_iq.csv /tmp/lsa_iq.csv
+uv run python scripts/live_comparison/compare_iq.py \
+    scripts/live_comparison/mantid_iq_calibrated.csv \
+    scripts/live_comparison/live_stream_analysis_iq_calibrated.csv
 ```
 
 ### 4. Plot them together
@@ -130,9 +141,9 @@ uv run python scripts/plot_csv_histogram.py \
 
 ![Four-way I(Q) comparison over the full Q range](comparison.png)
 
-Leaving off `--output-png` opens the interactive matplotlib window instead, which is the way
-to zoom around; pass both to get a window and a file. Narrowing the range shows where the
-reductions actually diverge:
+The plotter always opens the interactive matplotlib window, which is the way to zoom around;
+`--output-png` also saves a file, and `MPLBACKEND=Agg` skips the window. Narrowing the range
+shows where the reductions diverge:
 
 ```bash
 uv run python scripts/plot_csv_histogram.py \
@@ -146,52 +157,55 @@ uv run python scripts/plot_csv_histogram.py \
 
 ![The same comparison zoomed to Q 6.5-12.5](comparison-zoomed-in.png)
 
-Zoomed in, the four curves clearly peak at slightly different Q, and the calibrated analyzer
-(red) is both sharper and shifted right of the others. Walkthrough 1b below settles which one
-is actually correct.
+The green Mantid-calibrated curve is not missing: it is identical to the red calibrated analyzer
+curve, which is drawn over it. The two uncalibrated curves differ, for the geometry reason below.
+The calibrated pair has a lower baseline only because masked pixels are dropped.
 
 ## What this comparison currently shows
 
-Run on `NOM_243708` (232,190,586 events), uncalibrated on both sides:
+Run on `NOM_244114` (412,374,426 events). **Calibrated on both sides, the two reductions are
+identical, bin for bin**:
+
+```
+Bins compared        : 2000
+Max |dQ|             : 0.000e+00
+Total counts         : reference=200438900.0 candidate=200438900.0
+  total delta        : +0.0000%
+Mean relative dI     : 0.0000%
+Bins over tolerance  : 0 (tolerance 1.00%)
+```
+
+Both convert each event with `Q = 2*pi*DIFC / TOF`. Mantid's `ConvertUnits` to `MomentumTransfer`
+uses DIFC alone after `ApplyDiffCal`; DIFA and TZERO only enter its dSpacing conversion. The
+analyzer does the same since issue #42: the preparer writes `2*pi*DIFC` as each pixel's TOF-to-Q
+constant, and `difa`/`tzero` are kept in the CSV for reference only. The mask matches too:
+`LoadDiffCal`'s mask workspace removes exactly the pixels the preparer marks `use = 0` (69,008
+of 101,376 for this calibration), so 200,438,900 events survive on both sides.
+
+Uncalibrated, the two differ:
 
 ```
 Bins compared        : 2000
 Max |dQ|             : 0.000e+00        <- Q axes agree exactly
-Total counts         : Mantid 218,531,463  analyzer 218,458,745
-  total delta        : -0.0333%
-Mean relative dI     : 6.9912%
+Total counts         : reference=388223970.0 candidate=388087910.0
+  total delta        : -0.0350%
+Mean relative dI     : 7.0062%
 ```
 
-So the **Q axes align exactly** and the **totals agree to 0.03%**, but the per-bin
-distribution differs by ~7% on average. Overlaying the two shows why: the Bragg peaks sit at
-the same Q, but ours are sharper while Mantid's are broader and slightly split. That is a
-geometry-source difference, not a binning bug -- Mantid uses the instrument embedded in the
-NeXus file, while the analyzer uses `pixel_geometry.csv` generated from
-`tests/data/idf/NOMAD_Definition.xml`. Closing that gap means generating the pixel geometry
-from the same instrument definition the data file carries.
+The **Q axes align exactly** and the **totals agree to 0.04%**, but the per-bin distribution
+differs by about 7% on average. Overlaying the two shows why: ours are sharper, while Mantid's
+peaks are broader and slightly split. That is a geometry-source difference, not a binning bug:
+Mantid uses the instrument embedded in the NeXus file, while the analyzer uses
+`pixel_geometry.csv` generated from `tests/data/idf/NOMAD_Definition.xml`. Closing that gap means
+generating the pixel geometry from the same instrument definition the data file carries.
 
-### Open question: detector masking
+### Earlier masking discrepancy, resolved
 
-With `--calibration-file` on both sides the totals diverge by about 12%:
-
-```
-Total counts : Mantid 218,498,232   analyzer 192,415,745   (-11.94%)
-```
-
-The analyzer skips events from pixels whose `use` flag is 0 (41,110 of 101,376 on NOMAD);
-`ApplyDiffCal` only sets DIFC/DIFA/TZERO and masks nothing, so Mantid keeps them.
-
-Applying `LoadDiffCal`'s mask workspace is the obvious counterpart, and
-`--apply-calibration-mask` does exactly that -- but it overshoots in the other direction:
-
-```
-Total counts : Mantid 112,750,901   analyzer 192,415,745   (+70.66%)
-```
-
-So the mask workspace and the `use` column are not equivalent on NOMAD, and neither setting
-makes the totals line up. The flag is off by default. Resolving this needs someone familiar
-with how NOMAD's `use` flags relate to Mantid's masking, and it should be settled before
-these numbers are used to judge either implementation.
+An earlier version of this walkthrough found the totals 12 % apart with the calibration on, and
+70 % apart with `--apply-calibration-mask`. It concluded that the mask workspace and the `use`
+column were not equivalent on NOMAD. In fact the analyzer's `pixel_geometry_calibrated.csv` had
+been built from a different calibration (241348, 2026-05-13) from the one Mantid was given
+(243451). With one calibration file on both sides, the two masks agree exactly.
 
 ---
 
@@ -240,9 +254,8 @@ uv run python scripts/plot_csv_histogram.py \
 
 ![The four reductions against the expected diamond reflection positions](comparison-with-reflections.png)
 
-The dashed lines are fixed by the lattice parameter, so they settle the question the previous
-plot raised: the calibrated analyzer (red) sits on them, and the other three sit consistently
-to the left of them.
+The dashed lines are fixed by the lattice parameter. All four reductions sit to the left of
+them, by different amounts; the table below puts numbers on it.
 
 Related options:
 
@@ -253,35 +266,44 @@ Related options:
 
 ## Result on NOM_243708
 
-Across 21 matched reflections spanning Q = 3 to 18:
+Across 21 matched reflection## Result on NOM_244114
 
-| Reduction | mean dQ (1/A) | RMS dQ | trend in dQ/Q |
+Across 21 matched reflections spanning Q = 3 to 18, with the 243451 calibration:
+
+| Reduction | mean dQ (1/A) | RMS dQ | dQ/Q, excluding 111 |
 | --- | --- | --- | --- |
-| **live_stream_analysis, calibrated** | **-0.0005** | **0.0012** | none, scattered about zero |
-| Mantid, uncalibrated | -0.0237 | 0.0261 | roughly -0.2%, constant |
-| Mantid, calibrated | -0.0472 | 0.0502 | roughly -0.35%, constant |
-| live_stream_analysis, uncalibrated | -0.0747 | 0.0808 | roughly -0.75%, constant |
+| Mantid, uncalibrated | -0.0237 | 0.0260 | -0.19 % (-0.10 to -0.25) |
+| Mantid, calibrated (with mask) | -0.0497 | 0.0525 | -0.43 % (-0.35 to -0.45) |
+| live_stream_analysis, calibrated | -0.0497 | 0.0525 | -0.43 % (-0.35 to -0.45) |
+| live_stream_analysis, uncalibrated | -0.0757 | 0.0818 | -0.67 % (-0.21 to -0.83) |
 
-The calibrated analyzer places the diamond reflections on their literature positions to
-about 0.001 1/A, which is a twentieth of a bin. That is an absolute check, not a relative
-one, and it validates the calibrated TOF -> d -> Q path end to end.
+The two calibrated rows are the same because the histograms are identical. Without
+`--apply-calibration-mask`, Mantid calibrated gives -0.0474 1/A: the masked pixels shift the
+peak centres slightly.
 
-The other three show a *constant fractional* offset rather than a constant absolute one.
-`dQ/Q` staying flat with Q is the signature of a scale error -- an effective lattice
-parameter, or equivalently a DIFC scale, that is slightly off -- rather than a zero offset,
-which would show up as a constant `dQ`. For the uncalibrated analyzer the -0.75% scale error
-means `pixel_geometry.csv`, built from the static IDF, does not match the instrument as it
-was for this run. That is what the calibration corrects.
+With the calibration, `dQ/Q` is nearly flat with Q. That is the signature of a scale error: an
+effective DIFC, or equivalently a lattice parameter, that is slightly off. A zero offset would
+instead show up as a constant `dQ`. So the remaining -0.43 % is the calibration, not the
+conversion: both sides apply the same DIFC and get the same answer. The calibration was made ten
+days before this run, and NOMAD's sample position moves whenever the sample environment is
+swapped, which shifts every pixel's effective DIFC. Uncalibrated, the analyzer's
+`pixel_geometry.csv`, built from the static IDF, scatters more (-0.2 % to -0.8 %); that is what
+the calibration corrects.
 
 Two caveats:
 
-- **Mantid calibrated is worse than Mantid uncalibrated** (-0.35% vs -0.2%). That is
-  backwards, and suggests `mantid_iq_from_nexus.py` is not applying the calibration the way
-  Mantid's own reduction would, or that the calibration file used does not correspond to this
-  run. Worth resolving before treating the Mantid column as a reference.
-- The 111 reflection is an outlier in every file (-1.0% to -1.4%) while its neighbours are
+- **Mantid uncalibrated lands closer than either calibrated reduction** (-0.19 % against
+  -0.43 %). It uses the geometry embedded in the NeXus file, which evidently fits this run better
+  than the 243451 DIFCs do. A calibration from the same sample-environment setup as the run
+  should close this; none newer than 243451 is in `nexus_files/calibration/`.
+- The 111 reflection is an outlier in every file (-1.1 % to -1.4 %) while its neighbours are
   consistent. It is by far the strongest and most asymmetric peak, so the parabolic refinement
   is least reliable there; do not read much into that one line.
+
+Before issue #42 the analyzer also applied DIFA and TZERO, through
+`TOF = DIFA*d^2 + DIFC*d + TZERO`. On this run that gave a mean dQ of -0.036 1/A and narrower
+peaks at high Q, but it no longer matched Mantid's Q conversion. Only the TOF-to-Q constant is
+applied now.
 
 ## About the intensity column
 
@@ -418,12 +440,24 @@ geometry and no corrections, NeXus with `--tof-tick-us 1.0` and ADARA with `--to
 
 | Check | NeXus (412 M events) | ADARA first file (26 M events) |
 | --- | --- | --- |
-| Mean dQ against the diamond lattice, 21 reflections | -0.0360 1/A | -0.0349 1/A |
-| Peak centres, ADARA minus NeXus, 11 strong peaks | | mean +0.0006 1/A, max 0.0015 1/A |
-| Relative RMS shape difference, Q 1-20 | | 1.3 % |
+| Mean dQ against the diamond lattice, 21 reflections | -0.0497 1/A | -0.0486 1/A |
+| Peak centres, ADARA minus NeXus, 11 strong peaks | | mean +0.0007 1/A, max 0.0016 1/A |
+| Relative RMS shape difference, Q 1-20 (each scaled to unit total) | | 1.5 % |
 
-The two paths put every peak in the same place, to under a tenth of a 0.02 bin. The constant
--0.28 % offset that both share is the calibration, which predates this run by ten days. The 1.3 %
-shape difference is about three times what counting noise alone predicts (0.4 %). The ADARA file
-covers only the first 18 s of the 288 s run, so it may reflect a change over the run rather than
-a difference between the two paths; it has not been run down.
+The two paths put every peak in the same place, to under a tenth of a 0.02 bin. The nearly
+constant -0.43 % offset that both share is the calibration, which predates this run by ten days
+(Walkthrough 1b). The 1.5 % shape difference is nearly four times what counting noise alone
+predicts (0.4 %). The ADARA file covers only the first 18 s of the 288 s run, so it may reflect a
+change over the run rather than a difference between the two paths; it has not been run down.
+
+Peak centres and the shape difference use the definitions in
+`scripts/tutorial_dataset/trim_study.py` (`peak_centres`, and R over Q 1-20). Both reductions ran
+with `--normalize-by none`, and the ADARA one with:
+
+```bash
+uv run live_stream_analysis analyze \
+    --adara-file nomad-adara-carbon-share/20260619-140639.403016382-run-244114/m00000001-f00000001-run-244114.adara \
+    --histogram-pixel-geometry-csv pixel_geometry_calibrated.csv --tof-tick-us 0.1 \
+    --histogram-q-max 40 --histogram-q-bin-size 0.02 --normalize-by none \
+    --histogram-output-csv /tmp/adara_f1_iq.csv
+```
