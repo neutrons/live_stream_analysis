@@ -23,6 +23,8 @@ def _config() -> IntersectConfig:
 
 def test_set_background_dispatches_through_intersect_service_operation_map():
     runtime_state = HistogramRuntimeState()
+    received: list[str] = []
+    runtime_state.background_uploader = lambda csv_text, _source: received.append(csv_text) or "covers 2 of 2 bins"
     capability = LiveStreamAnalysisCapability(runtime_state=runtime_state)
     service = IntersectService([capability], build_service_config(_config()))
 
@@ -37,6 +39,5 @@ def test_set_background_dispatches_through_intersect_service_operation_map():
 
     response = UpdateResponse.model_validate_json(response_bytes)
 
-    assert response == UpdateResponse(status="updated", kind="background")
-    assert runtime_state.background_values == [10.0, 20.0]
-    assert runtime_state.background_errors == [1.0, 2.0]
+    assert response == UpdateResponse(status="updated", kind="background", message="covers 2 of 2 bins")
+    assert received == ["Q value,I(Q),Error I(Q)\n0.1,10.0,1.0\n0.2,20.0,2.0\n"]

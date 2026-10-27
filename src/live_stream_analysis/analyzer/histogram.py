@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..correction_totals import CorrectionTotals, load_correction_totals
+from ..correction_totals import CorrectionTotals, correction_totals_from_rows, load_correction_totals
 
 
 @dataclass(frozen=True)
@@ -147,24 +148,66 @@ def load_correction_csv(
     if not path.exists():
         raise FileNotFoundError(f"Correction CSV does not exist: {path}")
 
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        values, errors, _ = parse_correction_csv(
+            handle, expected_bins=expected_bins, q_bin_size=q_bin_size, q_min=q_min, q_max=q_max
+        )
+    return values, errors
+
+
+def parse_correction_csv(
+    lines: Iterable[str],
+    expected_bins: int,
+    q_bin_size: float,
+    q_min: float,
+    q_max: float,
+) -> tuple[list[float], list[float], CorrectionTotals]:
+    """Bin a correction's rows onto the histogram by Q value, returning it with its totals.
+
+    Rows outside [q_min, q_max] are dropped and bins no row lands in stay at zero.
+    """
+    reader = csv.DictReader(lines)
+    required_columns = {"Q value", "I(Q)", "Error I(Q)"}
+    if reader.fieldnames is None or not required_columns.issubset(set(reader.fieldnames)):
+        raise ValueError("Correction CSV must include columns: 'Q value', 'I(Q)', 'Error I(Q)'")
+
     values = [0.0] * expected_bins
     errors = [0.0] * expected_bins
-    with path.open("r", encoding="utf-8", newline="") as handle:
-        reader = csv.DictReader(handle)
-        required_columns = {"Q value", "I(Q)", "Error I(Q)"}
-        if reader.fieldnames is None or not required_columns.issubset(set(reader.fieldnames)):
-            raise ValueError("Correction CSV must include columns: 'Q value', 'I(Q)', 'Error I(Q)'")
+    rows = list(reader)
+    for row in rows:
+        q_value = float(row["Q value"])
+        intensity = float(row["I(Q)"])
+        error = float(row["Error I(Q)"])
+        bin_index = int((q_value - q_min) / q_bin_size)
+        if 0 <= bin_index < expected_bins and q_min <= q_value <= q_max:
+            values[bin_index] = intensity
+            errors[bin_index] = error
 
-        for row in reader:
-            q_value = float(row["Q value"])
-            intensity = float(row["I(Q)"])
-            error = float(row["Error I(Q)"])
-            bin_index = int((q_value - q_min) / q_bin_size)
-            if 0 <= bin_index < expected_bins and q_min <= q_value <= q_max:
-                values[bin_index] = intensity
-                errors[bin_index] = error
+    return values, errors, correction_totals_from_rows(rows)
 
-    return values, errors
+
+def replace_background(runtime_state, args: argparse.Namespace, histogram_bins: int, csv_text: str) -> int:
+    """Swap the background the running analysis subtracts, returning how many bins it covers.
+
+    The histogram accumulates raw counts and apply_corrections re-reads the background every
+    time it runs, so the next refresh, snapshot or publish uses this one. The CSV is binned by
+    Q value exactly as --background-subtraction is, and nothing is replaced if it is rejected.
+    """
+    values, errors, totals = parse_correction_csv(
+        io.StringIO(csv_text),
+        expected_bins=histogram_bins,
+        q_bin_size=args.histogram_q_bin_size,
+        q_min=args.histogram_q_min,
+        q_max=args.histogram_q_max,
+    )
+    matched_bins = sum(1 for value, error in zip(values, errors, strict=True) if value != 0.0 or error != 0.0)
+    if matched_bins == 0:
+        raise ValueError(
+            f"Background CSV has no rows with nonzero I(Q) or error inside "
+            f"Q [{args.histogram_q_min}, {args.histogram_q_max}]"
+        )
+    runtime_state.set_background(values, errors, totals)
+    return matched_bins
 
 
 def preload_corrections(runtime_state, args: argparse.Namespace, histogram_bins: int) -> None:
@@ -172,9 +215,12 @@ def preload_corrections(runtime_state, args: argparse.Namespace, histogram_bins:
 
     apply_corrections runs on every live-plot refresh, which is every packet by default, so
     reading the CSVs there would re-parse both files from disk tens of times a second. A
-    correction later posted over INTERSECT replaces these values, as it always has.
+    correction later posted over INTERSECT or uploaded to the dashboard replaces these values.
     """
-    for csv_path, kind in ((args.background_subtraction, "background"), (args.normalization, "normalization")):
+    for csv_path, setter in (
+        (args.background_subtraction, runtime_state.set_background),
+        (args.normalization, runtime_state.set_normalization),
+    ):
         if csv_path is None:
             continue
         values, errors = load_correction_csv(
@@ -184,9 +230,7 @@ def preload_corrections(runtime_state, args: argparse.Namespace, histogram_bins:
             q_min=args.histogram_q_min,
             q_max=args.histogram_q_max,
         )
-        setattr(runtime_state, f"{kind}_values", values)
-        setattr(runtime_state, f"{kind}_errors", errors)
-        setattr(runtime_state, f"{kind}_totals", load_correction_totals(csv_path))
+        setter(values, errors, load_correction_totals(csv_path))
 
 
 def apply_corrections(  # noqa: C901
@@ -211,10 +255,9 @@ def apply_corrections(  # noqa: C901
     background = None
     background_error = None
     background_totals = None
-    if runtime_state is not None and runtime_state.background_values is not None:
-        background = runtime_state.background_values
-        background_error = runtime_state.background_errors or [0.0] * len(background)
-        background_totals = runtime_state.background_totals
+    current_background = runtime_state.background() if runtime_state is not None else None
+    if current_background is not None:
+        background, background_error, background_totals = current_background
     elif args.background_subtraction is not None:
         background, background_error = load_correction_csv(
             args.background_subtraction,
@@ -239,10 +282,9 @@ def apply_corrections(  # noqa: C901
     normalization = None
     normalization_error = None
     normalization_totals = None
-    if runtime_state is not None and runtime_state.normalization_values is not None:
-        normalization = runtime_state.normalization_values
-        normalization_error = runtime_state.normalization_errors or [0.0] * len(normalization)
-        normalization_totals = runtime_state.normalization_totals
+    current_normalization = runtime_state.normalization() if runtime_state is not None else None
+    if current_normalization is not None:
+        normalization, normalization_error, normalization_totals = current_normalization
     elif args.normalization is not None:
         normalization, normalization_error = load_correction_csv(
             args.normalization,

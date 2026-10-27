@@ -65,6 +65,8 @@ class UpdateResponse(BaseModel):
 
     status: str
     kind: str
+    # A one-line summary of what was applied, e.g. how many bins a background covers.
+    message: str | None = None
 
 
 class StartAdaraFileReadResponse(BaseModel):
