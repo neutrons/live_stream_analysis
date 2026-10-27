@@ -34,7 +34,7 @@ from .histogram import (
     compute_relative_uncertainty,
     load_pixel_q_conversion,
     preload_corrections,
-    replace_background,
+    replace_correction,
     validate_histogram_args,
     write_histogram_csv,
 )
@@ -136,8 +136,9 @@ class _HistogramSession:
     def __post_init__(self) -> None:
         snapshot_every = self.args.histogram_snapshot_every
         self._next_snapshot_event_count = max(1, snapshot_every) if snapshot_every > 0 else None
-        # INTERSECT set_background reaches the session through the runtime state it shares.
-        self.runtime_state.background_uploader = self.upload_background
+        # INTERSECT set_background / set_normalization reach the session through the runtime
+        # state it shares.
+        self.runtime_state.correction_uploader = self.upload_correction
 
     def corrected(self, hist: list[int]) -> tuple[list[float], list[float]]:
         return apply_corrections(hist, self.args, self.histogram_bins, runtime_state=self.runtime_state)
@@ -333,21 +334,21 @@ class _HistogramSession:
     def set_active_hist(self, hist: list[int]) -> None:
         self.active_hist = hist
 
-    def upload_background(self, csv_text: str, source: str) -> str:
-        """Install a background CSV mid-run, returning a summary of what was applied (#43).
+    def upload_correction(self, kind: str, csv_text: str, source: str) -> str:
+        """Install a background or normalization CSV mid-run, returning a summary of what was applied.
 
-        The one path for both the dashboard upload and INTERSECT set_background. It runs on
-        their request threads, so it only redraws the plot: the CSV snapshots and INTERSECT
-        events pick the new background up on the next packet.
+        The one path for dashboard uploads and INTERSECT set_background / set_normalization
+        (#43, #44). It runs on their request threads, so it only redraws the plot: the CSV
+        snapshots and INTERSECT events pick the new correction up on the next packet.
         """
-        matched_bins = replace_background(self.runtime_state, self.args, self.histogram_bins, csv_text)
+        covered_bins = replace_correction(self.runtime_state, self.args, self.histogram_bins, kind, csv_text)
         if (
             getattr(self.plotter, "accepts_updates_from_any_thread", False)
             and self.active_hist is not None
             and any(self.active_hist)
         ):
             # Redraws are otherwise driven by event packets, so with the beam off the plot
-            # would keep showing the old subtraction and the upload would look ignored. A
+            # would keep showing the old correction and the upload would look ignored. A
             # matplotlib window can only be drawn from the analyzer's thread, so it waits.
             maybe_update_live_plot(
                 self.plotter,
@@ -359,14 +360,16 @@ class _HistogramSession:
                 statistics_series=self.runtime_state.run_statistics.series,
                 display_transform=self.corrected,
             )
-        summary = f"covers {matched_bins} of {self.histogram_bins} bins"
-        totals = self.runtime_state.background()[2]
+        summary = f"covers {covered_bins} of {self.histogram_bins} bins"
+        totals = getattr(self.runtime_state, kind)()[2]
         if self.args.normalize_by != "none" and (totals is None or totals.divisor(self.args.normalize_by) is None):
-            # The same caveat the startup CSV is logged with, surfaced where the operator is looking.
-            summary += "; records no exposure total, so it is subtracted on the sample's scale"
+            # The same caveat the startup CSV is logged with, surfaced where the operator is
+            # looking. Without totals apply_corrections falls back as described here.
+            consequence = "subtracted on the sample's scale" if kind == "background" else "applied unscaled"
+            summary += f"; records no exposure total, so it is {consequence}"
         if self.plotter is not None:
-            self.plotter.background_replaced(source, summary)
-        LOGGER.info("Background subtraction replaced from %s: %s", source, summary)
+            self.plotter.correction_replaced(kind, source, summary)
+        LOGGER.info("%s replaced from %s: %s", kind.capitalize(), source, summary)
         return summary
 
     def finish(self, hist: list[int]) -> tuple[list[float], list[float]]:
@@ -398,7 +401,6 @@ def _prepare_runtime_state(
     LOGGER.info("Loading pixel geometry CSV from %s", Path(args.histogram_pixel_geometry_csv).resolve())
     q_conversion = load_pixel_q_conversion(args.histogram_pixel_geometry_csv)
     runtime_state = HistogramRuntimeState(pixel_q_conversion=q_conversion)
-    runtime_state.correction_bins = histogram_bins
     q_values = bin_centre_q_values(args.histogram_q_min, args.histogram_q_bin_size, histogram_bins)
     statistics_window = StatisticsWindow.build(q_values, args.statistics_q_min, args.statistics_q_max)
     runtime_state.run_statistics.series.configure(args.statistics_sample_interval_seconds, statistics_window)
@@ -643,8 +645,11 @@ def _run_histogram_mode(reader, args: argparse.Namespace) -> int:
         plotter = create_live_histogram_plotter(
             args,
             histogram_bins,
-            background_handler=session.upload_background,
-            background_source=Path(args.background_subtraction).name if args.background_subtraction else None,
+            correction_handler=session.upload_correction,
+            correction_sources={
+                "background": Path(args.background_subtraction).name if args.background_subtraction else None,
+                "normalization": Path(args.normalization).name if args.normalization else None,
+            },
         )
         session.plotter = plotter
         _wait_for_source(args, runtime_state)

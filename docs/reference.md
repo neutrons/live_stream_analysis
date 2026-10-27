@@ -177,27 +177,28 @@ after the analysis ends, `--live-plot-no-open-browser` skips opening a tab, and
 `--live-plot-refresh-every N` refreshes every N packets (ADARA) or chunks of 250,000 events (NeXus).
 `--live-plot-mode desktop` opens the same panels in a matplotlib window instead.
 
-#### Replacing the background mid-run
+#### Replacing corrections mid-run
 
-The browser dashboard's **Background Subtraction** panel takes a background CSV, dropped onto it
-or chosen with a click, and subtracts it from then on without restarting the analysis. The
-histogram accumulates raw counts and the corrections are applied each time it is shown, so the
-counts collected so far are kept and simply re-corrected. The file is read exactly as
-`--background-subtraction` is, binned by `Q value` and scaled by its own exposure totals. A file
-with no rows inside the histogram's Q range, or without the three required columns, is rejected
-and the current background stays.
+The browser dashboard's **Background & Normalization** panel takes a background or normalization
+CSV, dropped onto its upload area or chosen with a click, and applies it from then on without
+restarting the analysis. The histogram accumulates raw counts and the corrections are applied
+each time it is shown, so the counts collected so far are kept and simply re-corrected. Each file
+is read exactly as `--background-subtraction` or `--normalization` is, binned by `Q value` and
+scaled by its own exposure totals. A file without the three required columns is rejected, as is
+one with nothing usable inside the histogram's Q range: no nonzero rows for a background, no
+positive I(Q) for a normalization. The current correction then stays.
 
 The plot redraws as soon as the upload is accepted, even with no data arriving. The histogram CSV
 snapshots and INTERSECT events pick it up from the next packet. Error-decay points already
-recorded keep the background they were computed with. The panel shows the active file and how many
-bins it covers, and warns if it records no exposure total for `--normalize-by`.
+recorded keep the corrections they were computed with. The panel shows each active file and how
+many bins it covers. For a normalization, that counts only bins with I(Q) > 0, since every other bin
+is zeroed. It also warns if a file records no exposure total for `--normalize-by`.
 
-INTERSECT `set_background` takes the same path: the CSV is checked and binned identically, the
-dashboard shows it as the active background, and the response's `message` carries the same
-summary. A desktop (`--live-plot-mode desktop`) window redraws on the next packet instead, since
-matplotlib cannot be drawn from the INTERSECT thread. `set_normalization` still assigns rows to
-bins by position. Anyone who can reach the dashboard can upload, so with
-`--live-plot-host 0.0.0.0` keep the port on a trusted network.
+INTERSECT `set_background` and `set_normalization` take the same path: the CSV is checked and
+binned identically, the dashboard shows it as the active correction, and the response's `message`
+carries the same summary. A desktop (`--live-plot-mode desktop`) window redraws on the next packet
+instead, since matplotlib cannot be drawn from the INTERSECT thread. Anyone who can reach the
+dashboard can upload, so with `--live-plot-host 0.0.0.0` keep the port on a trusted network.
 
 ## INTERSECT
 

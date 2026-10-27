@@ -23,7 +23,7 @@ from matplotlib.collections import LineCollection
 from matplotlib.widgets import Button
 
 from ..statistics import StatisticsSnapshot
-from .histogram import bin_centre_q_values, compute_relative_uncertainty, counting_variance
+from .histogram import CORRECTION_KINDS, bin_centre_q_values, compute_relative_uncertainty, counting_variance
 
 logger = logging.getLogger(__name__)
 
@@ -43,26 +43,30 @@ class HistogramPlotter(Protocol):
         statistics: StatisticsSnapshot | None = None,
     ) -> None: ...
 
-    def background_replaced(self, source: str, message: str) -> None: ...
+    def correction_replaced(self, kind: str, source: str, message: str) -> None: ...
 
     def wait_until_closed(self) -> None: ...
 
     def close(self) -> None: ...
 
 
-# Takes the uploaded CSV text and its file name, applies it or raises ValueError, and returns
-# a one-line summary for the page.
-BackgroundHandler = Callable[[str, str], str]
+# Takes the correction kind ("background" or "normalization"), the uploaded CSV text and its
+# file name, applies it or raises ValueError, and returns a one-line summary for the page.
+CorrectionHandler = Callable[[str, str, str], str]
 
 
 class _BrowserPlotState:
-    def __init__(self, q_values: list[float], background_source: str | None = None, uploads_enabled: bool = False):
+    def __init__(
+        self,
+        q_values: list[float],
+        correction_sources: dict[str, str | None] | None = None,
+        uploads_enabled: bool = False,
+    ):
         self._lock = threading.Lock()
-        self._background: dict[str, object] = {
-            "source": background_source,
-            "uploads_enabled": uploads_enabled,
-            "message": None,
-            "updated_at": None,
+        sources = correction_sources or {}
+        self._corrections: dict[str, dict[str, object]] = {
+            kind: {"source": sources.get(kind), "uploads_enabled": uploads_enabled, "message": None, "updated_at": None}
+            for kind in CORRECTION_KINDS
         }
         self._statistics = StatisticsSnapshot([], [], [])
         self._map_version = 0
@@ -87,12 +91,12 @@ class _BrowserPlotState:
 
     def snapshot(self) -> dict[str, object]:
         with self._lock:
-            return {**self._payload, "background": dict(self._background)}
+            return {**self._payload, **{kind: dict(state) for kind, state in self._corrections.items()}}
 
-    def background_replaced(self, source: str, message: str) -> None:
+    def correction_replaced(self, kind: str, source: str, message: str) -> None:
         with self._lock:
-            self._background = {
-                **self._background,
+            self._corrections[kind] = {
+                **self._corrections[kind],
                 "source": source,
                 "message": message,
                 "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -216,8 +220,9 @@ class _BrowserPlotRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
-        handler = self.server.background_handler
-        if parsed.path != "/background" or handler is None:
+        kind = parsed.path.lstrip("/")
+        handler = self.server.correction_handler
+        if kind not in CORRECTION_KINDS or handler is None:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
 
@@ -233,20 +238,20 @@ class _BrowserPlotRequestHandler(BaseHTTPRequestHandler):
                 remaining -= len(chunk)
             self._write_json(
                 HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
-                {"error": f"Background CSV is larger than {BrowserHistogramPlotter.MAX_UPLOAD_BYTES} bytes"},
+                {"error": f"{kind.capitalize()} CSV is larger than {BrowserHistogramPlotter.MAX_UPLOAD_BYTES} bytes"},
             )
             return
 
-        source = parse_qs(parsed.query).get("name", ["uploaded background"])[0]
+        source = parse_qs(parsed.query).get("name", [f"uploaded {kind}"])[0]
         try:
             csv_text = self.rfile.read(length).decode("utf-8-sig")
-            message = handler(csv_text, source)
+            message = handler(kind, csv_text, source)
         except (UnicodeDecodeError, ValueError) as exc:
-            logger.warning("Rejected background CSV %r uploaded to the live plot: %s", source, exc)
+            logger.warning("Rejected %s CSV %r uploaded to the live plot: %s", kind, source, exc)
             self._write_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return
 
-        self._write_json(HTTPStatus.OK, {"status": "updated", "source": source, "message": message})
+        self._write_json(HTTPStatus.OK, {"status": "updated", "kind": kind, "source": source, "message": message})
 
     def log_message(self, _format: str, *_args) -> None:
         return
@@ -260,18 +265,18 @@ class _BrowserPlotServer(ThreadingHTTPServer):
         server_address: tuple[str, int],
         state: _BrowserPlotState,
         html: str,
-        background_handler: BackgroundHandler | None = None,
+        correction_handler: CorrectionHandler | None = None,
     ):
         self.state = state
         self.html = html
-        self.background_handler = background_handler
+        self.correction_handler = correction_handler
         super().__init__(server_address, _BrowserPlotRequestHandler)
 
 
 class BrowserHistogramPlotter:
-    # A background CSV is a few thousand rows; anything near this is the wrong file.
+    # A correction CSV is a few thousand rows; anything near this is the wrong file.
     MAX_UPLOAD_BYTES = 16 * 1024 * 1024
-    # Updates only swap a payload under a lock, so a background replaced from a request
+    # Updates only swap a payload under a lock, so a correction replaced from a request
     # thread can redraw at once.
     accepts_updates_from_any_thread = True
 
@@ -284,17 +289,18 @@ class BrowserHistogramPlotter:
         port: int,
         open_browser: bool,
         *,
-        background_handler: BackgroundHandler | None = None,
-        background_source: str | None = None,
+        correction_handler: CorrectionHandler | None = None,
+        correction_sources: dict[str, str | None] | None = None,
     ):
-        """Serve the dashboard, accepting background CSV uploads when ``background_handler`` is given.
+        """Serve the dashboard, accepting correction CSV uploads when ``correction_handler`` is given.
 
-        The handler receives the uploaded CSV text, installs it or raises ValueError, and
-        returns a one-line summary that the page shows alongside the file name.
+        The handler receives the kind, the uploaded CSV text and its file name, installs it or
+        raises ValueError, and returns a one-line summary. ``correction_sources`` names the
+        background and normalization the run started with.
         """
         q_values = bin_centre_q_values(q_min, q_bin_size, histogram_bins)
-        self._state = _BrowserPlotState(q_values, background_source, uploads_enabled=background_handler is not None)
-        self._server = _BrowserPlotServer((host, port), self._state, _browser_plot_html(), background_handler)
+        self._state = _BrowserPlotState(q_values, correction_sources, uploads_enabled=correction_handler is not None)
+        self._server = _BrowserPlotServer((host, port), self._state, _browser_plot_html(), correction_handler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
         self.url = f"http://{host}:{self._server.server_port}/"
@@ -311,8 +317,8 @@ class BrowserHistogramPlotter:
     ) -> None:
         self._state.update(intensity, error, relative_uncertainty, statistics)
 
-    def background_replaced(self, source: str, message: str) -> None:
-        self._state.background_replaced(source, message)
+    def correction_replaced(self, kind: str, source: str, message: str) -> None:
+        self._state.correction_replaced(kind, source, message)
 
     def wait_until_closed(self) -> None:
         # Processing is over by the time anything waits here, so mark it complete. Otherwise a
@@ -537,7 +543,7 @@ class LiveHistogramPlotter:
         self._figure.canvas.flush_events()
         plt.pause(0.001)
 
-    def background_replaced(self, _source: str, _message: str) -> None:
+    def correction_replaced(self, _kind: str, _source: str, _message: str) -> None:
         # The window has nowhere to show it; the analyzer log records the change.
         return
 
@@ -558,7 +564,7 @@ class NullHistogramPlotter:
     ) -> None:
         return
 
-    def background_replaced(self, _source: str, _message: str) -> None:
+    def correction_replaced(self, _kind: str, _source: str, _message: str) -> None:
         return
 
     def wait_until_closed(self) -> None:
@@ -572,8 +578,8 @@ def create_live_histogram_plotter(
     args: argparse.Namespace,
     histogram_bins: int,
     *,
-    background_handler: BackgroundHandler | None = None,
-    background_source: str | None = None,
+    correction_handler: CorrectionHandler | None = None,
+    correction_sources: dict[str, str | None] | None = None,
 ) -> HistogramPlotter:
     """Build the plotter ``--live-plot-mode`` asks for; only the browser one takes uploads."""
     mode = getattr(args, "live_plot_mode", None)
@@ -588,8 +594,8 @@ def create_live_histogram_plotter(
             args.live_plot_host,
             args.live_plot_port,
             not args.live_plot_no_open_browser,
-            background_handler=background_handler,
-            background_source=background_source,
+            correction_handler=correction_handler,
+            correction_sources=correction_sources,
         )
 
     backend = matplotlib.get_backend().lower()
@@ -1165,7 +1171,8 @@ def _browser_plot_html() -> str:
                 <section class=\"panel\">
                     <div class=\"panel-header\">
                         <span class=\"panel-kicker\">Corrections</span>
-                        <h3 class=\"panel-title\">Background Subtraction</h3>
+                        <h3 class=\"panel-title\">Background &amp; Normalization</h3>
+                        <p class=\"panel-copy\">Replace either correction mid-run. It applies at once; the counts collected so far are kept and re-corrected.</p>
                     </div>
                     <div class=\"panel-body detail-list\">
                         <div class=\"detail-row\">
@@ -1179,7 +1186,20 @@ def _browser_plot_html() -> str:
                                 <input type=\"file\" id=\"background-file\" accept=\".csv,text/csv\" hidden>
                             </label>
                             <p class=\"upload-feedback\" id=\"background-feedback\"></p>
-                            <p class=\"chart-hint\">Same format as --background-subtraction. Applies from the next refresh; the counts collected so far are kept.</p>
+                            <p class=\"chart-hint\">Same format as --background-subtraction.</p>
+                        </div>
+                        <div class=\"detail-row\">
+                            <span class=\"detail-label\">Active normalization</span>
+                            <div class=\"detail-value\" id=\"normalization-source\">None</div>
+                            <div class=\"chart-hint\" id=\"normalization-detail\"></div>
+                        </div>
+                        <div class=\"detail-row\">
+                            <label class=\"upload-zone\" id=\"normalization-upload\" for=\"normalization-file\">
+                                Drop a normalization (vanadium) CSV here, or click to choose one.
+                                <input type=\"file\" id=\"normalization-file\" accept=\".csv,text/csv\" hidden>
+                            </label>
+                            <p class=\"upload-feedback\" id=\"normalization-feedback\"></p>
+                            <p class=\"chart-hint\">Same format as --normalization.</p>
                         </div>
                     </div>
                 </section>
@@ -1933,70 +1953,76 @@ def _browser_plot_html() -> str:
             }
         });
 
-        const backgroundZone = document.getElementById('background-upload');
-        const backgroundInput = document.getElementById('background-file');
-        const backgroundFeedback = document.getElementById('background-feedback');
-        let backgroundUploadsEnabled = false;
+        // One upload control per correction; both post to /<kind> and share this code.
+        const correctionVerbs = { background: 'subtracting', normalization: 'normalizing by' };
+        const correctionUploads = {};
 
-        function renderBackground(background) {
-            if (!background) {
-                return;
-            }
-            backgroundUploadsEnabled = background.uploads_enabled;
-            document.getElementById('background-source').textContent = background.source || 'None';
-            const detail = [background.message, background.updated_at ? `replaced ${background.updated_at}` : null];
-            document.getElementById('background-detail').textContent = detail.filter(Boolean).join(' \u00b7 ');
-            backgroundZone.classList.toggle('disabled', !backgroundUploadsEnabled);
-            backgroundInput.disabled = !backgroundUploadsEnabled;
+        function showCorrectionFeedback(kind, text, ok) {
+            const feedback = document.getElementById(`${kind}-feedback`);
+            feedback.textContent = text;
+            feedback.className = `upload-feedback ${ok ? 'ok' : 'error'}`;
         }
 
-        function showBackgroundFeedback(text, ok) {
-            backgroundFeedback.textContent = text;
-            backgroundFeedback.className = `upload-feedback ${ok ? 'ok' : 'error'}`;
-        }
-
-        async function uploadBackground(file) {
-            if (!backgroundUploadsEnabled) {
-                showBackgroundFeedback('This analyzer session does not accept background uploads.', false);
+        function renderCorrection(kind, correction) {
+            if (!correction) {
                 return;
             }
-            showBackgroundFeedback(`Uploading ${file.name}...`, true);
+            const upload = correctionUploads[kind];
+            upload.enabled = correction.uploads_enabled;
+            document.getElementById(`${kind}-source`).textContent = correction.source || 'None';
+            const detail = [correction.message, correction.updated_at ? `replaced ${correction.updated_at}` : null];
+            document.getElementById(`${kind}-detail`).textContent = detail.filter(Boolean).join(' \u00b7 ');
+            upload.zone.classList.toggle('disabled', !upload.enabled);
+            upload.input.disabled = !upload.enabled;
+        }
+
+        async function uploadCorrection(kind, file) {
+            if (!correctionUploads[kind].enabled) {
+                showCorrectionFeedback(kind, `This analyzer session does not accept ${kind} uploads.`, false);
+                return;
+            }
+            showCorrectionFeedback(kind, `Uploading ${file.name}...`, true);
             try {
-                const response = await fetch(`/background?name=${encodeURIComponent(file.name)}`, {
+                const response = await fetch(`/${kind}?name=${encodeURIComponent(file.name)}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'text/csv' },
                     body: await file.text(),
                 });
                 const reply = await response.json().catch(() => ({ error: response.statusText }));
                 if (response.ok) {
-                    showBackgroundFeedback(`Now subtracting ${reply.source}: ${reply.message}.`, true);
+                    showCorrectionFeedback(kind, `Now ${correctionVerbs[kind]} ${reply.source}: ${reply.message}.`, true);
                 } else {
-                    showBackgroundFeedback(`Rejected ${file.name}: ${reply.error}`, false);
+                    showCorrectionFeedback(kind, `Rejected ${file.name}: ${reply.error}`, false);
                 }
             } catch (error) {
-                showBackgroundFeedback(`Upload failed: ${error}`, false);
+                showCorrectionFeedback(kind, `Upload failed: ${error}`, false);
             }
         }
 
-        backgroundInput.addEventListener('change', () => {
-            if (backgroundInput.files.length > 0) {
-                uploadBackground(backgroundInput.files[0]);
-            }
-            // Cleared so choosing the same file again, e.g. after editing it, still uploads.
-            backgroundInput.value = '';
-        });
-        backgroundZone.addEventListener('dragover', (event) => {
-            event.preventDefault();
-            backgroundZone.classList.add('dragging');
-        });
-        backgroundZone.addEventListener('dragleave', () => backgroundZone.classList.remove('dragging'));
-        backgroundZone.addEventListener('drop', (event) => {
-            event.preventDefault();
-            backgroundZone.classList.remove('dragging');
-            if (event.dataTransfer.files.length > 0) {
-                uploadBackground(event.dataTransfer.files[0]);
-            }
-        });
+        for (const kind of Object.keys(correctionVerbs)) {
+            const zone = document.getElementById(`${kind}-upload`);
+            const input = document.getElementById(`${kind}-file`);
+            correctionUploads[kind] = { zone, input, enabled: false };
+            input.addEventListener('change', () => {
+                if (input.files.length > 0) {
+                    uploadCorrection(kind, input.files[0]);
+                }
+                // Cleared so choosing the same file again, e.g. after editing it, still uploads.
+                input.value = '';
+            });
+            zone.addEventListener('dragover', (event) => {
+                event.preventDefault();
+                zone.classList.add('dragging');
+            });
+            zone.addEventListener('dragleave', () => zone.classList.remove('dragging'));
+            zone.addEventListener('drop', (event) => {
+                event.preventDefault();
+                zone.classList.remove('dragging');
+                if (event.dataTransfer.files.length > 0) {
+                    uploadCorrection(kind, event.dataTransfer.files[0]);
+                }
+            });
+        }
 
         async function refresh() {
             if (interactionDepth > 0) {
@@ -2013,7 +2039,8 @@ def _browser_plot_html() -> str:
             relativeChart.update('none');
             renderStatistics(payload);
             refreshStatisticsMap();
-            renderBackground(payload.background);
+            renderCorrection('background', payload.background);
+            renderCorrection('normalization', payload.normalization);
             const statusElement = document.getElementById('status');
             const runStateElement = document.getElementById('run-state');
             const isClosed = payload.closed;
