@@ -2,6 +2,15 @@ from __future__ import annotations
 
 import argparse
 
+from .nexus import DEFAULT_NEXUS_PULSES_PER_CHUNK, NEXUS_REPLAY_ORDERS
+
+
+def _positive_int(text: str) -> int:
+    value = int(text)
+    if value <= 0:
+        raise argparse.ArgumentTypeError(f"must be a positive integer, got {text}")
+    return value
+
 
 def add_intersect_listener_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
     """Register the 'intersect-listen' subcommand and return its parser."""
@@ -50,6 +59,24 @@ def add_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         nargs=2,
         metavar=("HOSTNAME", "PORT"),
         help="Hostname and port of a live ADARA stream (e.g. bl10-daq1 31415).",
+    )
+    parser.add_argument(
+        "--nexus-replay-order",
+        choices=NEXUS_REPLAY_ORDERS,
+        default="time",
+        help=(
+            "Order to replay NeXus events in: 'time' follows the run pulse by pulse across every detector bank, "
+            "as ADARA streams it; 'bank' reads one bank (one Q range) at a time (default: time)."
+        ),
+    )
+    parser.add_argument(
+        "--nexus-pulses-per-chunk",
+        type=_positive_int,
+        default=DEFAULT_NEXUS_PULSES_PER_CHUNK,
+        help=(
+            "Pulses read per NeXus chunk in time order; 60 is one second of beam, 1 matches ADARA pulse for pulse "
+            f"(default: {DEFAULT_NEXUS_PULSES_PER_CHUNK})."
+        ),
     )
     parser.add_argument(
         "--adara-stream-reconnect-delay",

@@ -108,6 +108,8 @@ class _NexusRunner:
             live_plot_refresh_every=args.live_plot_refresh_every,
             event_log_interval=args.event_log_interval,
             chunk_size=chunk_size,
+            replay_order=args.nexus_replay_order,
+            pulses_per_chunk=args.nexus_pulses_per_chunk,
             q_conversion_provider=q_conversion_provider,
             histogram_callback=histogram_callback,
             hist=hist,
