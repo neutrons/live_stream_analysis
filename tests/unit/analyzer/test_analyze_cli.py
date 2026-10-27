@@ -41,6 +41,22 @@ def _write_nexus(tmp_path: Path, name: str, event_ids: list[int], event_tofs: li
     return path
 
 
+def _write_pulsed_nexus(tmp_path: Path, banks: dict[str, list[list[int]]]) -> Path:
+    """Write a NeXus file indexed by pulse, as NOM records it, with every event at TOF 1 us."""
+    path = tmp_path / "pulsed.nxs.h5"
+    pulse_count = len(next(iter(banks.values())))
+    with h5py.File(path, "w") as handle:
+        entry = handle.create_group("entry")
+        for bank_name, pulses in banks.items():
+            event_ids = [pixel for pulse in pulses for pixel in pulse]
+            events = entry.create_group(bank_name)
+            events.create_dataset("event_id", data=np.array(event_ids, dtype=np.uint32))
+            events.create_dataset("event_time_offset", data=np.ones(len(event_ids), dtype=np.float32))
+            events.create_dataset("event_index", data=np.cumsum([0] + [len(p) for p in pulses[:-1]]).astype(np.uint64))
+            events.create_dataset("event_time_zero", data=np.arange(pulse_count) / 60.0)
+    return path
+
+
 def _minimal_idf() -> str:
     return """<?xml version='1.0' encoding='UTF-8'?>
 <instrument name='TEST' xmlns='http://www.mantidproject.org/IDF/1.0'>
@@ -1645,6 +1661,55 @@ class TestNexusFileCLI:
         err = capsys.readouterr().err
         assert "Processing NeXus chunks" in err
         assert "2/2" in err
+
+    def test_nexus_replay_defaults_to_time_order_in_one_second_windows(self):
+        args = build_parser().parse_args(["analyze", "--nexus-file", "run.nxs.h5"])
+
+        assert args.nexus_replay_order == "time"
+        assert args.nexus_pulses_per_chunk == 60
+
+    @pytest.mark.parametrize(
+        ("order_args", "expected_progress"),
+        [
+            ([], "4/4"),
+            (["--nexus-pulses-per-chunk", "3"], "2/2"),
+            (["--nexus-replay-order", "bank"], "2/2"),
+        ],
+    )
+    def test_nexus_replay_order_flags_reach_the_reader(self, tmp_path: Path, capsys, order_args, expected_progress):
+        """Four pulses over two banks: one chunk per pulse in time order, one per bank in bank order."""
+        nexus_path = _write_pulsed_nexus(tmp_path, {"bank1_events": [[1], [], [1], [1]], "bank2_events": [[1]] * 4})
+        pixel_csv = tmp_path / "pixel_geometry.csv"
+        pixel_csv.write_text(
+            "pixel id,L2 value,theta value,TOF-to-Q matrix element\n1,1.0,1.57079632679,99.0\n",
+            encoding="utf-8",
+        )
+        histogram_csv = tmp_path / "histogram.csv"
+
+        rc = main(
+            [
+                "analyze",
+                "--nexus-file",
+                str(nexus_path),
+                "--histogram-pixel-geometry-csv",
+                str(pixel_csv),
+                "--histogram-q-max",
+                "100",
+                "--histogram-output-csv",
+                str(histogram_csv),
+                "--nexus-pulses-per-chunk",
+                "1",
+                *order_args,
+            ]
+        )
+
+        assert rc == 0
+        assert f"{expected_progress} " in capsys.readouterr().err
+        assert "99.01000000,7.00000000," in histogram_csv.read_text(encoding="utf-8")
+
+    def test_nexus_pulses_per_chunk_must_be_positive(self):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["analyze", "--nexus-file", "run.nxs.h5", "--nexus-pulses-per-chunk", "0"])
 
 
 class TestPreparedPixelGeometryCalibrationIntegration:

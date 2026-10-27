@@ -84,10 +84,24 @@ the geometry embedded in each NeXus file, without a calibration.
 | --- | --- | --- |
 | Live ADARA stream | `--adara-stream HOST PORT` | NOMAD's SMS is `bl1b-daq1.sns.gov 31415` (SNS network or VPN). Reconnects after a drop, every `--adara-stream-reconnect-delay` seconds, up to `--adara-stream-max-reconnects` times (-1 for unlimited). |
 | Recorded ADARA file | `--adara-file FILE` | One file of a run. `scripts/live_comparison/adara_replay_server.py` replays several files as a stream. |
-| Event NeXus file | `--nexus-file FILE` | Repeat to combine runs. |
+| Event NeXus file | `--nexus-file FILE` | Repeat to combine runs; they are replayed one after another. |
 
 With `--histogram-pixel-geometry-csv`, it histograms every event into I(Q) on the
 `--histogram-q-min/-max/-bin-size` grid; without it, it only counts packets and events.
+
+#### NeXus replay order
+
+A NOM event NeXus file stores each detector bank's events separately, but every bank records the
+same pulse timeline (`event_time_zero`) and where each pulse starts in its events (`event_index`).
+By default (`--nexus-replay-order time`) the analyzer uses these to replay the run in the order it
+was measured, as ADARA streams it: `--nexus-pulses-per-chunk` pulses (default 60, one second of
+beam; 1 matches ADARA pulse for pulse) from every bank, then the next pulses. I(Q) therefore fills
+in across the whole Q range as the run progresses. Reading in this order costs only seconds over
+a whole run, next to minutes of histogramming.
+
+`--nexus-replay-order bank` reads one bank at a time instead, in chunks of 250,000 events. Each
+bank sits at a fixed angle, so I(Q) fills one Q range after another. The final I(Q) is identical
+either way. A file without `event_index` is replayed in bank order with a warning.
 
 ### Corrections and normalization
 
@@ -109,8 +123,12 @@ The sample's counting error is sqrt(N) per bin, and 1 count for an empty bin, fo
 yet as perfectly known. Only the error changes: I(Q) is the same either way.
 
 Proton charge and pulse time come from ADARA RTDL and event packets on the ADARA path. A NeXus
-file is replayed bank by bank, so there they are attributed from the run's `entry/proton_charge`
-and `entry/duration` in proportion to the events processed so far.
+file replayed in time order takes them pulse by pulse from `event_time_zero` and
+`DASlogs/proton_charge`, the same quantities; without a per-pulse charge log, the run's
+`entry/proton_charge` is spread evenly over the pulses. Several files continue each other's time
+and charge. In bank order every pulse comes round once per bank, so the run's
+`entry/proton_charge` and `entry/duration` are attributed in proportion to the events processed
+so far instead.
 
 Optional `--sample-coherent-scatter-length` and `--sample-total-scatter-length-squared` convert the
 corrected intensity to a Mantid-style S(Q).
@@ -174,7 +192,8 @@ error, so it cannot pass for converged.
 `--live-plot-mode browser` serves a dashboard (port `--live-plot-port`, default 8000) with I(Q),
 σ/I(Q), the error decay and a run summary, polled twice a second. `--live-plot-keep-open` keeps it up
 after the analysis ends, `--live-plot-no-open-browser` skips opening a tab, and
-`--live-plot-refresh-every N` refreshes every N packets (ADARA) or chunks of 250,000 events (NeXus).
+`--live-plot-refresh-every N` refreshes every N packets (ADARA) or chunks (NeXus: pulse windows in
+time order, 250,000 events in bank order).
 `--live-plot-mode desktop` opens the same panels in a matplotlib window instead.
 
 #### Replacing corrections mid-run
