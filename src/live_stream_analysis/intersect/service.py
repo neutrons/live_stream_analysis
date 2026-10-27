@@ -1,4 +1,3 @@
-import csv
 import io
 import logging
 import queue
@@ -15,7 +14,7 @@ from intersect_sdk import (
     intersect_status,
 )
 
-from ..correction_totals import CorrectionTotals, correction_totals_from_rows
+from ..correction_totals import CorrectionTotals
 from ..statistics import RunStatistics
 from .config import build_service_config
 from .data_models import (
@@ -55,16 +54,16 @@ class HistogramRuntimeState:
     normalization_values: list[float] | None = None
     normalization_errors: list[float] | None = None
     normalization_totals: CorrectionTotals | None = None
-    correction_bins: int | None = None
     adara_file_read_released: bool = True
     adara_file_read_event: threading.Event = field(default_factory=threading.Event)
     run_statistics: RunStatistics = field(default_factory=RunStatistics)
     # Corrections are replaced from the INTERSECT and dashboard threads while the analyzer
     # thread applies them, so values, errors and totals are swapped and read as one unit.
     correction_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
-    # Installed by the running analysis: takes background CSV text and the name of where it
-    # came from, applies it the way a dashboard upload is applied, and returns a summary.
-    background_uploader: Callable[[str, str], str] | None = field(default=None, repr=False)
+    # Installed by the running analysis: takes the correction kind ("background" or
+    # "normalization"), its CSV text and the name of where it came from, applies it the way a
+    # dashboard upload is applied, and returns a summary.
+    correction_uploader: Callable[[str, str, str], str] | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if self.adara_file_read_released:
@@ -111,25 +110,6 @@ class HistogramRuntimeState:
             errors = self.normalization_errors or [0.0] * len(self.normalization_values)
             return self.normalization_values, errors, self.normalization_totals
 
-    def validate_correction_length(self, values: list[float], kind: str) -> None:
-        if self.correction_bins is None:
-            self.correction_bins = len(values)
-            return
-        if len(values) != self.correction_bins:
-            raise ValueError(f"{kind} correction CSV has {len(values)} bins but expected {self.correction_bins}")
-
-
-def _load_correction_from_csv_text(csv_text: str) -> tuple[list[float], list[float], CorrectionTotals]:
-    reader = csv.DictReader(io.StringIO(csv_text))
-    required_columns = {"Q value", "I(Q)", "Error I(Q)"}
-    if reader.fieldnames is None or not required_columns.issubset(set(reader.fieldnames)):
-        raise ValueError("Correction CSV must include columns: 'Q value', 'I(Q)', 'Error I(Q)'")
-
-    rows = list(reader)
-    values = [float(row["I(Q)"]) for row in rows]
-    errors = [float(row["Error I(Q)"]) for row in rows]
-    return values, errors, correction_totals_from_rows(rows)
-
 
 def _load_pixel_q_conversion_from_csv_text(csv_text: str) -> Any:
     from ..analyzer.histogram import parse_pixel_q_conversion
@@ -155,18 +135,19 @@ class LiveStreamAnalysisCapability(IntersectBaseCapabilityImplementation):
     @intersect_message()
     def set_background(self, payload: CsvTextRequest) -> UpdateResponse:
         """Replace the background mid-run, exactly as a CSV uploaded to the dashboard does."""
-        uploader = self.runtime_state.background_uploader
-        if uploader is None:
-            raise ValueError("set_background has no running analysis to bin the background onto")
-        message = uploader(payload.csv_text, "INTERSECT set_background")
-        return UpdateResponse(status="updated", kind="background", message=message)
+        return self._upload_correction("background", payload)
 
     @intersect_message()
     def set_normalization(self, payload: CsvTextRequest) -> UpdateResponse:
-        values, errors, totals = _load_correction_from_csv_text(payload.csv_text)
-        self.runtime_state.validate_correction_length(values, "Normalization")
-        self.runtime_state.set_normalization(values, errors, totals)
-        return UpdateResponse(status="updated", kind="normalization")
+        """Replace the normalization mid-run, exactly as a CSV uploaded to the dashboard does."""
+        return self._upload_correction("normalization", payload)
+
+    def _upload_correction(self, kind: str, payload: CsvTextRequest) -> UpdateResponse:
+        uploader = self.runtime_state.correction_uploader
+        if uploader is None:
+            raise ValueError(f"set_{kind} has no running analysis to bin the {kind} onto")
+        message = uploader(kind, payload.csv_text, f"INTERSECT set_{kind}")
+        return UpdateResponse(status="updated", kind=kind, message=message)
 
     @intersect_message()
     def set_pixel_geometry_conversion(self, payload: CsvTextRequest) -> UpdateResponse:

@@ -186,13 +186,26 @@ def parse_correction_csv(
     return values, errors, correction_totals_from_rows(rows)
 
 
-def replace_background(runtime_state, args: argparse.Namespace, histogram_bins: int, csv_text: str) -> int:
-    """Swap the background the running analysis subtracts, returning how many bins it covers.
+CORRECTION_KINDS = ("background", "normalization")
 
-    The histogram accumulates raw counts and apply_corrections re-reads the background every
-    time it runs, so the next refresh, snapshot or publish uses this one. The CSV is binned by
-    Q value exactly as --background-subtraction is, and nothing is replaced if it is rejected.
+
+def _covered_bins(kind: str, values: list[float], errors: list[float]) -> int:
+    if kind == "normalization":
+        # apply_corrections zeroes I(Q) wherever V <= 0, so only positive bins normalize anything.
+        return sum(1 for value in values if value > 0.0)
+    return sum(1 for value, error in zip(values, errors, strict=True) if value != 0.0 or error != 0.0)
+
+
+def replace_correction(runtime_state, args: argparse.Namespace, histogram_bins: int, kind: str, csv_text: str) -> int:
+    """Swap the background or normalization the running analysis applies, returning how many bins it covers.
+
+    The histogram accumulates raw counts and apply_corrections re-reads both corrections every
+    time it runs, so the next refresh, snapshot or publish uses this one. The CSV is binned by Q
+    value exactly as --background-subtraction and --normalization are, and nothing is replaced
+    if it is rejected.
     """
+    if kind not in CORRECTION_KINDS:
+        raise ValueError(f"Unknown correction kind {kind!r}; expected one of {', '.join(CORRECTION_KINDS)}")
     values, errors, totals = parse_correction_csv(
         io.StringIO(csv_text),
         expected_bins=histogram_bins,
@@ -200,14 +213,15 @@ def replace_background(runtime_state, args: argparse.Namespace, histogram_bins: 
         q_min=args.histogram_q_min,
         q_max=args.histogram_q_max,
     )
-    matched_bins = sum(1 for value, error in zip(values, errors, strict=True) if value != 0.0 or error != 0.0)
-    if matched_bins == 0:
+    covered_bins = _covered_bins(kind, values, errors)
+    if covered_bins == 0:
+        wanted = "positive I(Q)" if kind == "normalization" else "nonzero I(Q) or error"
         raise ValueError(
-            f"Background CSV has no rows with nonzero I(Q) or error inside "
-            f"Q [{args.histogram_q_min}, {args.histogram_q_max}]"
+            f"{kind.capitalize()} CSV has no rows with {wanted} "
+            f"inside Q [{args.histogram_q_min}, {args.histogram_q_max}]"
         )
-    runtime_state.set_background(values, errors, totals)
-    return matched_bins
+    getattr(runtime_state, f"set_{kind}")(values, errors, totals)
+    return covered_bins
 
 
 def preload_corrections(runtime_state, args: argparse.Namespace, histogram_bins: int) -> None:
