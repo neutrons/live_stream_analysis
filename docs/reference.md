@@ -104,6 +104,10 @@ twice as long as the sample is therefore subtracted at half weight. A correction
 totals, such as one from an older preparer, is used on the sample's scale as before, and the
 analyzer logs a warning at startup.
 
+The sample's counting error is sqrt(N) per bin, and 1 count for an empty bin, following Mantid's
+`SetUncertainties` "sqrtOrOne" convention. Plain sqrt(0) = 0 would report a bin with nothing in it
+yet as perfectly known. Only the error changes: I(Q) is the same either way.
+
 Proton charge and pulse time come from ADARA RTDL and event packets on the ADARA path. A NeXus
 file is replayed bank by bank, so there they are attributed from the run's `entry/proton_charge`
 and `entry/duration` in proportion to the events processed so far.
@@ -159,6 +163,11 @@ early decay.
 Without corrections, σ/I(Q) does not depend on `--normalize-by`, since normalization scales the
 intensity and its error alike. With a background that has its own totals, the background is
 re-weighted against the sample and σ/I(Q) shifts accordingly.
+
+σ/I(Q) is undefined where I(Q) = 0. Those bins are left out of the mean and drawn as gaps in the
+plots. Early in a run, before most bins hold any counts, the first decay points are therefore
+high rather than near zero. Every bin with background subtracted carries at least the one-count
+error, so it cannot pass for converged.
 
 ### Live plot
 
