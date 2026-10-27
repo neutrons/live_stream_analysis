@@ -22,7 +22,7 @@ from matplotlib.collections import LineCollection
 from matplotlib.widgets import Button
 
 from ..statistics import StatisticsSnapshot
-from .histogram import bin_centre_q_values, compute_relative_uncertainty
+from .histogram import bin_centre_q_values, compute_relative_uncertainty, counting_variance
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class _BrowserPlotState:
             "q_values": q_values,
             "intensity": [0.0] * len(q_values),
             "error": [0.0] * len(q_values),
-            "relative_uncertainty": [0.0] * len(q_values),
+            "relative_uncertainty": [None] * len(q_values),
             "statistics": StatisticsSnapshot([], [], []).as_payload(),
             "status": {
                 "update_count": 0,
@@ -119,7 +119,9 @@ class _BrowserPlotState:
                 "q_values": self._payload["q_values"],
                 "intensity": intensity,
                 "error": error,
-                "relative_uncertainty": relative_uncertainty,
+                # None, not 0.0, where sigma/I is undefined, so the page leaves a gap there
+                # instead of drawing an empty bin as a perfectly known one.
+                "relative_uncertainty": [value if value != 0.0 else None for value in relative_uncertainty],
                 "statistics": statistics_payload,
                 "status": {
                     "update_count": int(self._payload["status"]["update_count"]) + 1,
@@ -435,7 +437,7 @@ class LiveHistogramPlotter:
             # folded in explicitly or tall error bars get clipped by the autoscale.
             self._axis.update_datalim([point for segment in segments for point in segment])
         self._axis.autoscale_view()
-        self._relative_line.set_ydata(relative_uncertainty)
+        self._relative_line.set_ydata([value if value != 0.0 else math.nan for value in relative_uncertainty])
         self._relative_axis.relim()
         self._relative_axis.autoscale_view()
         if statistics is not None:
@@ -501,8 +503,8 @@ DisplayTransform = Callable[[list[int]], tuple[list[float], list[float]]]
 
 
 def raw_counts_display(hist: list[int] | list[float]) -> tuple[list[float], list[float]]:
-    """Show the histogram as raw counts with Poisson errors."""
-    return [float(value) for value in hist], [math.sqrt(max(float(value), 0.0)) for value in hist]
+    """Show the histogram as raw counts with Poisson errors, one count for an empty bin."""
+    return [float(value) for value in hist], [math.sqrt(counting_variance(float(value))) for value in hist]
 
 
 def maybe_update_live_plot(
@@ -1076,6 +1078,12 @@ def _browser_plot_html() -> str:
 
         function toSeries(xValues, yValues) {
             return xValues.map((xValue, index) => ({ x: xValue, y: yValues[index] ?? 0 }));
+        }
+
+        // sigma/I(Q) arrives as null where it is undefined (I(Q) = 0). Keep the null so Chart.js
+        // leaves a gap; toSeries would draw it as 0, which reads as a perfectly known bin.
+        function toGapSeries(xValues, yValues) {
+            return xValues.map((xValue, index) => ({ x: xValue, y: yValues[index] ?? null }));
         }
 
         // A log axis cannot render zero or negative bins. Emit null so Chart.js leaves a gap
@@ -1787,7 +1795,7 @@ def _browser_plot_html() -> str:
             const payload = await response.json();
             const status = payload.status;
             latestPayload = payload;
-            const relativeSeries = toSeries(payload.q_values, payload.relative_uncertainty);
+            const relativeSeries = toGapSeries(payload.q_values, payload.relative_uncertainty);
             renderIntensity(payload);
             initializeXAxisBounds(relativeChart, payload.q_values);
             relativeChart.data.datasets[0].data = relativeSeries;
