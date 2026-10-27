@@ -68,9 +68,6 @@ def test_accumulate_adara_histogram_uses_ehsan_default_tof_then_pixel_tuple_orde
     reader = _Reader([_Packet([(1, 100)])])
     q_conversion = PixelQConversion(
         q_matrix_constants=[0.0, 1000.0],
-        difc=[0.0, 1000.0 / (2.0 * 3.141592653589793)],
-        difa=[0.0, 0.0],
-        tzero=[0.0, 0.0],
         use=[1, 1],
     )
 
@@ -107,9 +104,6 @@ def test_accumulate_adara_histogram_calls_run_complete_callback_only_for_end_run
     )
     q_conversion = PixelQConversion(
         q_matrix_constants=[0.0, 1000.0],
-        difc=[0.0, 1000.0 / (2.0 * 3.141592653589793)],
-        difa=[0.0, 0.0],
-        tzero=[0.0, 0.0],
         use=[1, 1],
     )
     completed_packets: list[_RunStatusPacket] = []
@@ -151,9 +145,6 @@ def test_accumulate_adara_histogram_detects_end_run_from_status_accessor_without
     reader = _Reader([_Packet([(1, 100)]), _ForeignRunStatusPacket(4)])
     q_conversion = PixelQConversion(
         q_matrix_constants=[0.0, 1000.0],
-        difc=[0.0, 1000.0 / (2.0 * 3.141592653589793)],
-        difa=[0.0, 0.0],
-        tzero=[0.0, 0.0],
         use=[1, 1],
     )
     completed_packets: list[_ForeignRunStatusPacket] = []
@@ -200,9 +191,6 @@ def test_accumulate_adara_histogram_returns_at_end_run(monkeypatch: pytest.Monke
     )
     q_conversion = PixelQConversion(
         q_matrix_constants=[0.0, 1000.0],
-        difc=[0.0, 0.0],
-        difa=[0.0, 0.0],
-        tzero=[0.0, 0.0],
         use=[1, 1],
     )
     completed_packets: list[_RunStatusPacket] = []
@@ -253,9 +241,6 @@ def test_accumulate_adara_histogram_ignores_run_status_lookalike_packets(monkeyp
     reader = _Reader([_DoublePacket(1), _DoublePacket(4), _Packet([(100, 1)])])
     q_conversion = PixelQConversion(
         q_matrix_constants=[0.0, 1000.0],
-        difc=[0.0, 0.0],
-        difa=[0.0, 0.0],
-        tzero=[0.0, 0.0],
         use=[1, 1],
     )
     completed_packets: list[_Packet] = []
@@ -297,9 +282,6 @@ def test_accumulate_adara_histogram_resets_but_keeps_reading_at_new_run(monkeypa
     )
     q_conversion = PixelQConversion(
         q_matrix_constants=[0.0, 1000.0],
-        difc=[0.0, 0.0],
-        difa=[0.0, 0.0],
-        tzero=[0.0, 0.0],
         use=[1, 1],
     )
     completed_packets: list[_RunStatusPacket] = []
@@ -333,9 +315,6 @@ def test_accumulate_adara_histogram_ignores_non_banked_event_packets():
     reader = _Reader([_Packet([(1, 100)], format_int=0x400000), _Packet([(1, 100)], format_int=0x400001)])
     q_conversion = PixelQConversion(
         q_matrix_constants=[0.0, 1000.0],
-        difc=[0.0, 1000.0 / (2.0 * 3.141592653589793)],
-        difa=[0.0, 0.0],
-        tzero=[0.0, 0.0],
         use=[1, 1],
     )
 
@@ -362,9 +341,6 @@ def test_accumulate_adara_histogram_uses_default_tof_pixel_binning():
     reader = _Reader([_Packet([(100, 1)])])
     q_conversion = PixelQConversion(
         q_matrix_constants=[0.0, 1000.0],
-        difc=[0.0, 0.0],
-        difa=[0.0, 0.0],
-        tzero=[0.0, 0.0],
         use=[1, 1],
     )
 
@@ -391,9 +367,6 @@ def test_accumulate_adara_histogram_honors_nonzero_q_min():
     reader = _Reader([_Packet([(100, 1)])])
     q_conversion = PixelQConversion(
         q_matrix_constants=[0.0, 1000.0],
-        difc=[0.0, 0.0],
-        difa=[0.0, 0.0],
-        tzero=[0.0, 0.0],
         use=[1, 1],
     )
 
@@ -420,9 +393,6 @@ def test_accumulate_adara_histogram_tracks_invalid_and_out_of_range_events():
     reader = _Reader([_Packet([(999, 100), (1, 0), (1, 1)])])
     q_conversion = PixelQConversion(
         q_matrix_constants=[0.0, 1000.0],
-        difc=[0.0, 1000.0 / (2.0 * 3.141592653589793)],
-        difa=[0.0, 0.0],
-        tzero=[0.0, 0.0],
         use=[1, 1],
     )
 
@@ -451,9 +421,6 @@ def test_accumulate_adara_histogram_tracks_invalid_and_out_of_range_events():
 def _q_conversion_for_pixel_one() -> PixelQConversion:
     return PixelQConversion(
         q_matrix_constants=[0.0, 1000.0],
-        difc=[0.0, 0.0],
-        difa=[0.0, 0.0],
-        tzero=[0.0, 0.0],
         use=[1, 1],
     )
 

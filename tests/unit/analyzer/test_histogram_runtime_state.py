@@ -34,9 +34,6 @@ def test_pixel_tof_to_q_uses_runtime_conversion_when_updated():
     runtime_state = HistogramRuntimeState(
         pixel_q_conversion=PixelQConversion(
             q_matrix_constants=[50.0],
-            difc=[0.0],
-            difa=[0.0],
-            tzero=[0.0],
             use=[1],
         )
     )

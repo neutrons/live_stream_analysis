@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from live_stream_analysis.analyzer.histogram import load_pixel_q_conversion, pixel_tof_to_q
 from live_stream_analysis.correction_totals import DURATION_COLUMN, PROTON_CHARGE_COLUMN, CorrectionTotals
 from live_stream_analysis.intersect.data_models import CsvTextRequest, StartAdaraFileReadRequest
 from live_stream_analysis.intersect.service import HistogramRuntimeState, LiveStreamAnalysisCapability
@@ -94,6 +95,25 @@ def test_set_pixel_geometry_conversion_updates_live_histogram_state():
     assert response.kind == "pixel_geometry_conversion"
     assert capability.runtime_state.pixel_q_conversion is not None
     assert capability.runtime_state.pixel_q_conversion.q_matrix_constants[:2] == [100.0, 110.0]
+
+
+def test_set_pixel_geometry_conversion_matches_the_file_loader(tmp_path):
+    """The INTERSECT update and --histogram-pixel-geometry-csv must convert TOF to Q identically."""
+    csv_text = "\n".join(
+        [
+            "pixel id,L2 value,theta value,TOF-to-Q matrix element,difc,difa,tzero,use",
+            "0,1.0,20.0,12000.0,1909.8593,-5.4,5.7,1",
+            "2,1.1,21.0,11000.0,1750.7044,0.0,0.0,0",
+        ]
+    )
+    pixel_csv = tmp_path / "pixel_geometry.csv"
+    pixel_csv.write_text(csv_text + "\n", encoding="utf-8")
+    capability = LiveStreamAnalysisCapability()
+
+    capability.set_pixel_geometry_conversion(CsvTextRequest(csv_text=csv_text))
+
+    assert capability.runtime_state.pixel_q_conversion == load_pixel_q_conversion(str(pixel_csv))
+    assert pixel_tof_to_q(capability.runtime_state.pixel_q_conversion, 0, tof_us=2000.0) == pytest.approx(6.0)
 
 
 def test_set_background_rejects_invalid_csv():
